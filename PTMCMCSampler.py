@@ -926,10 +926,7 @@ class PTSampler(object):
 
         else:
             # temperature swap
-            if iter % self.Tskip == 0 and self.nchain > 1:
-                p0, lnlike0, lnprob0 = self.PTswap(
-                    p0, lnlike0, lnprob0, iter
-                )  # No temperature swap for MSTI
+            # No parallel tempering swaps (single-chain per beta run)
 
             self.updateChains(p0, lnlike0, lnprob0, iter)
 
