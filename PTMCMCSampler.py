@@ -237,10 +237,6 @@ class PTSampler(object):
 
 
         """
-        # Annealing controls (always trace beta)
-        self.beta_step = float(beta_step)
-        self.beta_hold_samples = int(beta_hold_samples)
-
         # get maximum number of iteration
         if maxIter is None and self.MPIrank > 0:
             maxIter = Niter
@@ -611,6 +607,10 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps,
             )
 
+        # Annealing controls (always trace beta)
+        self.beta_step = float(beta_step)
+        self.beta_hold_samples = int(beta_hold_samples)
+        
         # compute lnprob for initial point in chain
 
         # if resuming, just start with first point in chain
