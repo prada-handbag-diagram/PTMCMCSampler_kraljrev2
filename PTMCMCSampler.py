@@ -344,25 +344,29 @@ class PTSampler(object):
         # randomize cycle
         self.randomizeProposalCycle()
 
-        # if ladder given check if in temp or beta
-        if self.ladder:
-            if any(self.ladder) > 1:
-                # user gave temperatures >>> convert to beta
-                self.ladder = [1 / temp for temp in self.ladder]
-
-        # ladder not specified, create one
+        # No parallel tempering: single-chain per beta run
+        self.nchain = 1
+        
+        # No parallel tempering: choose a single beta
+        # If user passed a ladder, take its first entry; otherwise use Bmax/Tmin
+        if ladder is not None:
+            try:
+                self.beta = float(ladder[0]) # ladder list/array-like
+            except TypeError:
+                self.beta = float(ladder) # ladder scalar
         else:
-            # If temperatures are used, convert to beta
-            if Tmin:  # used temperatures
-                Bmax = 1 / Tmin  # Tmin is typically 1
-            if Tmax:
-                Bmin = 1 / Tmax
+            if Tmin is not None:
+                self.beta = float(1.0 / Tmin)
+            else:
+                self.beta = float(Bmax)
 
-            self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+        # Optional: keep "hotChain" behavior as an explicit beta=0 run
+        if hotChain:
+            self.beta = 0.0
 
-        # beta for current chain
-        self.beta = self.ladder[self.MPIrank]
-
+        # Keep a 1-element ladder for any code that expects it
+        self.ladder = [self.beta]
+        
         # Name chain files
         if hotChain and self.MPIrank == self.nchain - 1:
             self.beta = 0  # This is the "hot chain"
