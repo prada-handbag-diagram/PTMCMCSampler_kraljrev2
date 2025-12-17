@@ -439,6 +439,9 @@ class PTSampler(object):
             self._chain[ind, :] = p0
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
+            # Store beta alongside each saved sample for file output
+            if self._beta is not None and ind < len(self._beta):
+                self._beta[ind] = self.beta
 
             if lnlike1 and lnlike2 and lnprob1 and lnprob2:
                 self._lnlike1[ind] = lnlike1
@@ -610,7 +613,11 @@ class PTSampler(object):
         # Annealing controls (always trace beta)
         self.beta_step = float(beta_step)
         self.beta_hold_samples = int(beta_hold_samples)
-        
+
+        # Allocate beta trace aligned with saved samples
+        N_save = int(Niter / thin) + 1
+        self._beta = np.zeros(N_save, dtype=float)
+
         # compute lnprob for initial point in chain
 
         # if resuming, just start with first point in chain
