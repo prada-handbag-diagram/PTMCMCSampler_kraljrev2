@@ -237,6 +237,10 @@ class PTSampler(object):
 
 
         """
+        # Annealing controls (always trace beta)
+        self.beta_step = float(beta_step)
+        self.beta_hold_samples = int(beta_hold_samples)
+
         # get maximum number of iteration
         if maxIter is None and self.MPIrank > 0:
             maxIter = Niter
@@ -517,6 +521,8 @@ class PTSampler(object):
         hotChain=False,
         model_param_idx=None,
         nameChainTemps=False,
+        beta_step=0.0,
+        beta_hold_samples=0,
     ):
         """
         Function to carry out PTMCMC sampling.
