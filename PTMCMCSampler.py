@@ -636,6 +636,9 @@ class PTSampler(object):
         N_save = int(Niter / thin) + 1
         self._beta = np.zeros(N_save, dtype=float)
 
+        # Continuous annealing: set beta for the initial sample
+        self.beta = min(1.0, max(0.0, float(i0) / float(self.Niter)))
+
         # compute lnprob for initial point in chain
 
         # if resuming, just start with first point in chain
@@ -711,21 +714,35 @@ class PTSampler(object):
         runComplete = False
         while runComplete is False:
             iter += 1
-            # call PTMCMCOneStep
+            
+            # Continuous annealing: advance beta every iteration (independent of acceptance)
+            self.beta = min(1.0, max(0.0, float(iter) / float(self.Niter)))
+
+            # Recompute lnprob0 for the *current* state at the current beta (required so the Metropolis ratio is consistent)
+            if self.n_metaparams == 4:
+                lp0 = self.logp(p0)
+                if lp0 == float(-np.inf):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lp0
+                    
+            elif self.n_metaparams == 8:
+                lnprob0 = self.beta * lnlike0 + lnprob2
+
+            # (3) take one MCMC step at this beta
             if self.n_metaparams == 4:
                 p0, lnlike0, lnprob0 = self.PTMCMCOneStep(p0, lnlike0, lnprob0, iter)
+
             elif self.n_metaparams == 8:
-                p0, lnlike0, lnprob0, lnlike1, lnprob1, lnlike2, lnprob2 = (
-                    self.PTMCMCOneStep(
-                        p0,
-                        lnlike0,
-                        lnprob0,
-                        iter,
-                        lnlike1=lnlike1,
-                        lnprob1=lnprob1,
-                        lnlike2=lnlike2,
-                        lnprob2=lnprob2,
-                    )
+                p0, lnlike0, lnprob0, lnlike1, lnprob1, lnlike2, lnprob2 = self.PTMCMCOneStep(
+                    p0,
+                    lnlike0,
+                    lnprob0,
+                    iter,
+                    lnlike1=lnlike1,
+                    lnprob1=lnprob1,
+                    lnlike2=lnlike2,
+                    lnprob2=lnprob2,
                 )
 
             # decide whether to stop (single-chain)
