@@ -107,8 +107,8 @@ class PTSampler(object):
                         "Parallel tempering disabled (single-chain per beta run). "
                         "Please run with exactly 1 MPI rank."
                     )
-           except AttributeError:
-               # comm is not a real MPI communicator (e.g. nompi4py)
+            except AttributeError:
+                # comm is not a real MPI communicator (e.g. nompi4py)
                 pass
 
         if self.MPIrank == 0:
