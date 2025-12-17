@@ -784,36 +784,9 @@ class PTSampler(object):
         if (iter - 1) % self.covUpdate == 0 and (iter - 1) != 0 and self.MPIrank == 0:
             self._updateRecursive(iter - 1, self.covUpdate)
 
-            # broadcast to other chains
-            [
-                self.comm.send(self.cov, dest=rank + 1, tag=111)
-                for rank in range(self.nchain - 1)
-            ]
-
-        # update covariance matrix
-        if (iter - 1) % self.covUpdate == 0 and (iter - 1) != 0 and self.MPIrank > 0:
-            self.cov[:, :] = self.comm.recv(source=0, tag=111)
-            for ct, group in enumerate(self.groups):
-                covgroup = np.zeros((len(group), len(group)))
-                for ii in range(len(group)):
-                    for jj in range(len(group)):
-                        covgroup[ii, jj] = self.cov[group[ii], group[jj]]
-
-                self.U[ct], self.S[ct], v = np.linalg.svd(covgroup)
-
         # update DE buffer
         if (iter - 1) % self.burn == 0 and (iter - 1) != 0 and self.MPIrank == 0:
             self._updateDEbuffer(iter - 1, self.burn)
-
-            # broadcast to other chains
-            [
-                self.comm.send(self._DEbuffer, dest=rank + 1, tag=222)
-                for rank in range(self.nchain - 1)
-            ]
-
-        # update DE buffer
-        if (iter - 1) % self.burn == 0 and (iter - 1) != 0 and self.MPIrank > 0:
-            self._DEbuffer = self.comm.recv(source=0, tag=222)
 
             # randomize cycle
             if self.DEJump not in self.propCycle:
