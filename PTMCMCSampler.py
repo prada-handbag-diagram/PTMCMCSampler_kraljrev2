@@ -363,6 +363,7 @@ class PTSampler(object):
         # Optional: keep "hotChain" behavior as an explicit beta=0 run
         if hotChain:
             # beta already set above (single-chain per beta run)
+            pass
 
 
         # Keep a 1-element ladder for any code that expects it
@@ -692,15 +693,12 @@ class PTSampler(object):
                 lnprob2=lnprob2,
             )
 
-        self.comm.barrier()
-
         # start iterations
         iter = i0
 
         runComplete = False
         while runComplete is False:
             iter += 1
-            self.comm.barrier()  # make sure all processes are at the same iteration
             # call PTMCMCOneStep
             if self.n_metaparams == 4:
                 p0, lnlike0, lnprob0 = self.PTMCMCOneStep(p0, lnlike0, lnprob0, iter)
@@ -718,42 +716,28 @@ class PTSampler(object):
                     )
                 )
 
-            # rank 0 decides whether to stop
-            if self.MPIrank == 0:
-                if iter >= self.Niter:  # stop if reached maximum number of iterations
-                    message = "\nRun Complete"
-                    runComplete = True
-                elif (
-                    self.neff
-                ):  # Stop if effective number of samples reached if requested
-                    if iter % 1000 == 0 and iter > 2 * self.burn and self.MPIrank == 0:
-                        Neff = iter / max(
-                            1,
-                            np.nanmax(
-                                [
-                                    acor.acor(self._chain[self.burn : (iter - 1), ii])[
-                                        0
-                                    ]
-                                    for ii in range(self.ndim)
-                                ]
-                            ),
-                        )
-                        # print('\n {0} effective samples'.format(Neff))
-                        if int(Neff) >= self.neff:
-                            message = (
-                                "\nRun Complete with {0} effective samples".format(
-                                    int(Neff)
-                                )
-                            )
-                            runComplete = True
-
-            runComplete = self.comm.bcast(
-                runComplete, root=0
-            )  # rank 0 tells others whether to stop
+            # decide whether to stop (single-chain)
+            if iter >= self.Niter:
+                message = "\nRun Complete"
+                runComplete = True
+            elif self.neff:
+                if iter % 1000 == 0 and iter > 2 * self.burn:
+                    Neff = iter / max(
+                        1,
+                        np.nanmax(
+                            [
+                                acor.acor(self._chain[self.burn : (iter - 1), ii])[0]
+                                for ii in range(self.ndim)
+                            ]
+                        ),
+                    )
+                    if int(Neff) >= self.neff:
+                        message = "\nRun Complete with {0} effective samples".format(int(Neff))
+                        runComplete = True
 
             if runComplete:
                 self.writeOutput(iter)  # Possibly write partial block
-                if self.MPIrank == 0 and self.verbose:
+                if self.verbose:
                     print(message)
 
     def PTMCMCOneStep(
