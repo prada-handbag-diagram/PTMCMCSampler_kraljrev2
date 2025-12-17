@@ -99,6 +99,18 @@ class PTSampler(object):
         self.MPIrank = self.comm.Get_rank()
         self.nchain = self.comm.Get_size()
 
+        # Parallel tempering disabled: enforce single MPI rank
+        if self.comm is not None:
+            try:
+                if self.comm.Get_size() != 1:
+                    raise RuntimeError(
+                        "Parallel tempering disabled (single-chain per beta run). "
+                        "Please run with exactly 1 MPI rank."
+                    )
+           except AttributeError:
+               # comm is not a real MPI communicator (e.g. nompi4py)
+                pass
+
         if self.MPIrank == 0:
             ss = np.random.SeedSequence(seed)
             child_seeds = ss.generate_state(self.nchain)
