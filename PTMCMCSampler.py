@@ -1080,6 +1080,9 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
+            beta_val = self._beta[ind] if hasattr(self, "_beta") else self.beta
+            
+            self._chainfile.write("%f\t" % beta_val)
             self._chainfile.write(
                 "\t".join(
                     ["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)]
