@@ -362,14 +362,15 @@ class PTSampler(object):
 
         # Optional: keep "hotChain" behavior as an explicit beta=0 run
         if hotChain:
-            self.beta = 0.0
+            # beta already set above (single-chain per beta run)
+
 
         # Keep a 1-element ladder for any code that expects it
         self.ladder = [self.beta]
         
         # Name chain files
         if hotChain and self.MPIrank == self.nchain - 1:
-            self.beta = 0  # This is the "hot chain"
+            # beta already set above (single-chain per beta run)
             if nameChainTemps:  # if you prefer the old naming scheme
                 self.fname = self.outDir + "/chain_hot.txt"
             else:  # new naming scheme with beta
