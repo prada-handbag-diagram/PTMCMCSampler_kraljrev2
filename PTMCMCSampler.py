@@ -440,7 +440,7 @@ class PTSampler(object):
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
             # Store beta alongside each saved sample for file output
-            if self._beta is not None and ind < len(self._beta):
+            if hasattr(self, "_beta") and ind < len(self._beta):
                 self._beta[ind] = self.beta
 
             if lnlike1 and lnlike2 and lnprob1 and lnprob2:
