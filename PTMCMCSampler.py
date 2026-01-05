@@ -49,7 +49,7 @@ class PTSampler(object):
     This implementation also makes use of MPI (mpi4py) to run
     the parallel chains.
 
-    Along with the AM and DE jumps, the user can add custom
+    Along with the AM and DE jumps, the user can add custom 
     jump proposals with the ``addProposalToCycle`` fuction.
 
     @param ndim: number of dimensions in problem
