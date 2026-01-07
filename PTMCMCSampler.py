@@ -261,6 +261,7 @@ class PTSampler(object):
         self._lnprob = np.zeros(N)
         self._lnlike = np.zeros(N)
         self._chain = np.zeros((N, self.ndim))
+        self._beta = np.zeros(N)
         self.ind_next_write = 0  # Next index in these arrays to write out
         self.naccepted = 0
         self.swapProposed = 0
@@ -439,6 +440,7 @@ class PTSampler(object):
             self._chain[ind, :] = p0
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
+            self._beta[ind] = self.beta
 
             if lnlike1 and lnlike2 and lnprob1 and lnprob2:
                 self._lnlike1[ind] = lnlike1
