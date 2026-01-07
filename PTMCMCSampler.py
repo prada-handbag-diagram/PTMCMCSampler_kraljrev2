@@ -601,7 +601,7 @@ class PTSampler(object):
         # if picking up from previous run, don't re-initialize
         if i0 == 0:
             self.initialize(
-                Niter,
+                Niter_total,
                 Bmax=Bmax,
                 Bmin=Bmin,
                 ladder=ladder,
@@ -630,11 +630,16 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps,
             )
 
+        # Change 4: set initial beta for annealing
+        if anneal:
+            self.beta = min(1.0, max(0.0, float(i0) / float(ramp_iter)))
+        
         # compute lnprob for initial point in chain
 
         # if resuming, just start with first point in chain
         if self.resume and self.resumeLength > 0:
-            p0 = self.resumechain[0, : -self.n_metaparams]
+            self.beta = float(self.resumechain[0, 0])
+            p0 = self.resumechain[0, 1 : -self.n_metaparams]
             lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[0, -self.n_metaparams]
 
@@ -707,6 +712,22 @@ class PTSampler(object):
         runComplete = False
         while runComplete is False:
             iter += 1
+            # Change 4: annealing schedule (advance beta every iteration)
+            if anneal:
+                if iter <= ramp_iter:
+                    self.beta = min(1.0, max(0.0, float(iter) / float(ramp_iter)))
+                else:
+                    self.beta = 1.0
+                # Recompute lnprob0 for the CURRENT state at the CURRENT beta
+                if self.n_metaparams == 4:
+                    lp0 = self.logp(p0)
+                    if lp0 == -np.inf:
+                        lnprob0 = -np.inf
+                    else:
+                        lnprob0 = self.beta * lnlike0 + lp0
+                elif self.n_metaparams == 8:
+                    lnprob0 = self.beta * lnlike0 + lnprob2
+                    
             self.comm.barrier()  # make sure all processes are at the same iteration
             # call PTMCMCOneStep
             if self.n_metaparams == 4:
@@ -845,7 +866,8 @@ class PTSampler(object):
             and self.resumeLength > 0
             and iter < self.resumeLength * self.thin
         ):
-            p0 = self.resumechain[0, : -self.n_metaparams]
+            self.beta = float(self.resumechain[0, 0])
+            p0 = self.resumechain[0, 1 : -self.n_metaparams]
             lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[0, -self.n_metaparams]
 
