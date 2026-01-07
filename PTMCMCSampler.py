@@ -527,6 +527,9 @@ class PTSampler(object):
         hotChain=False,
         model_param_idx=None,
         nameChainTemps=False,
+        anneal=False,
+        post_iter=0,
+        anneal_iter=None,
     ):
         """
         Function to carry out PTMCMC sampling.
@@ -571,6 +574,18 @@ class PTSampler(object):
         elif maxIter is None and self.MPIrank == 0:
             maxIter = Niter
 
+        # Change 4: annealing configuration (Option 1)
+        self.disable_pt = bool(anneal)
+        ramp_iter = int(anneal_iter) if anneal_iter is not None else int(Niter)
+        if ramp_iter <= 0:
+            raise ValueError("anneal_iter must be a positive integer (or None).")
+
+        post_iter = int(post_iter)
+        if post_iter < 0:
+            raise ValueError("post_iter must be >= 0.")
+
+        Niter_total = ramp_iter + post_iter if anneal else int(Niter)
+        
         if isave % thin != 0:
             raise ValueError(
                 "isave = %d is not a multiple of thin =  %d" % (isave, thin)
