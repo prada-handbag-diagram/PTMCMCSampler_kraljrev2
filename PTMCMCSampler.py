@@ -98,6 +98,7 @@ class PTSampler(object):
         self.comm = comm
         self.MPIrank = self.comm.Get_rank()
         self.nchain = self.comm.Get_size()
+        self.disable_pt = False  # will be set True when annealing is enabled (Change 4)
 
         if self.MPIrank == 0:
             ss = np.random.SeedSequence(seed)
@@ -243,6 +244,13 @@ class PTSampler(object):
         elif maxIter is None and self.MPIrank == 0:
             maxIter = Niter
 
+        # Change 3: PT disable guard (activated later when annealing is enabled)
+        if getattr(self, "disable_pt", False) and self.nchain != 1:
+            raise RuntimeError(
+                "Parallel tempering is disabled for this run (annealing mode). "
+                "Run with exactly 1 MPI rank."
+            )
+        
         self.ladder = ladder
         self.covUpdate = covUpdate
         self.SCAMweight = SCAMweight
@@ -1069,11 +1077,17 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
+            # NEW: write beta first
+            self._chainfile.write("%f\t" % self._beta[ind])
+
+            # existing: write parameters
             self._chainfile.write(
                 "\t".join(
                     ["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)]
                 )
             )
+            
+            # existing: write metas
             self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
 
             if self.n_metaparams == 8:  # MSTI
