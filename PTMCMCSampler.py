@@ -563,12 +563,6 @@ class PTSampler(object):
 
         """
 
-        # get maximum number of iteration
-        if maxIter is None and self.MPIrank > 0:
-            maxIter = Niter
-        elif maxIter is None and self.MPIrank == 0:
-            maxIter = Niter
-
         # Change 4: annealing configuration (Option 1)
         self.disable_pt = bool(anneal)
         ramp_iter = int(anneal_iter) if anneal_iter is not None else int(Niter)
