@@ -587,7 +587,7 @@ class PTSampler(object):
         if Niter_total % thin != 0:
             print(
                 "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
-                % (Niter, thin, Niter % thin)
+                % (Niter_total, thin, Niter_total % thin)
             )
 
         # set up arrays to store lnprob, lnlike and chain
