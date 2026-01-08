@@ -591,7 +591,7 @@ class PTSampler(object):
                 "isave = %d is not a multiple of thin =  %d" % (isave, thin)
             )
 
-        if Niter % thin != 0:
+        if Niter_total % thin != 0:
             print(
                 "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
                 % (Niter, thin, Niter % thin)
