@@ -238,11 +238,6 @@ class PTSampler(object):
 
 
         """
-        # get maximum number of iteration
-        if maxIter is None and self.MPIrank > 0:
-            maxIter = Niter
-        elif maxIter is None and self.MPIrank == 0:
-            maxIter = Niter
 
         # Change 3: PT disable guard (activated later when annealing is enabled)
         if getattr(self, "disable_pt", False) and self.nchain != 1:
@@ -585,6 +580,10 @@ class PTSampler(object):
             raise ValueError("post_iter must be >= 0.")
 
         Niter_total = ramp_iter + post_iter if anneal else int(Niter)
+
+        # Ensure maxIter matches the total number of iterations we will actually run
+        if maxIter is None:
+            maxIter = Niter_total
         
         if isave % thin != 0:
             raise ValueError(
