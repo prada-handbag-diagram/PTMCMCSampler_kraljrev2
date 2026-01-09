@@ -257,7 +257,8 @@ class PTSampler(object):
         self.isave = isave
         self.Niter = Niter
         self.neff = neff
-        self.tstart = 0
+        self.tstart = time.time()
+
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
