@@ -523,6 +523,7 @@ class PTSampler(object):
         model_param_idx=None,
         nameChainTemps=False,
         anneal=False,
+        hold_iter=0,
         post_iter=0,
         anneal_iter=None,
     ):
@@ -572,9 +573,13 @@ class PTSampler(object):
         post_iter = int(post_iter)
         if post_iter < 0:
             raise ValueError("post_iter must be >= 0.")
+        
+        hold_iter = int(hold_iter)
+        if hold_iter < 0:
+            raise ValueError("hold_iter must be >= 0.")
 
-        Niter_total = ramp_iter + post_iter if anneal else int(Niter)
-
+        Niter_total = (hold_iter + ramp_iter + post_iter) if anneal else int(Niter)
+        
         # Ensure maxIter matches the total number of iterations we will actually run
         if maxIter is None:
             maxIter = Niter_total
@@ -625,7 +630,12 @@ class PTSampler(object):
 
         # Change 4: set initial beta for annealing
         if anneal:
-            self.beta = min(1.0, max(0.0, float(i0) / float(ramp_iter)))
+            if i0 <= hold_iter:
+                self.beta = 0.0
+            elif i0 <= hold_iter + ramp_iter:
+                self.beta = float(i0 - hold_iter) / float(ramp_iter)
+            else:
+                self.beta = 1.0
         
         # compute lnprob for initial point in chain
 
@@ -707,8 +717,10 @@ class PTSampler(object):
             iter += 1
             # Change 4: annealing schedule (advance beta every iteration)
             if anneal:
-                if iter <= ramp_iter:
-                    self.beta = min(1.0, max(0.0, float(iter) / float(ramp_iter)))
+                if iter <= hold_iter:
+                    self.beta = 0.0
+                elif iter <= hold_iter + ramp_iter:
+                    self.beta = float(iter - hold_iter) / float(ramp_iter)
                 else:
                     self.beta = 1.0
                 # Recompute lnprob0 for the CURRENT state at the CURRENT beta
