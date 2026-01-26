@@ -441,7 +441,7 @@ class PTSampler(object):
             self._lnprob[ind] = lnprob0
             self._beta[ind] = self.beta
 
-            if lnlike1 and lnlike2 and lnprob1 and lnprob2:
+            if (lnlike1 is not None) and (lnlike2 is not None) and (lnprob1 is not None) and (lnprob2 is not None):
                 self._lnlike1[ind] = lnlike1
                 self._lnprob1[ind] = lnprob1
                 self._lnlike2[ind] = lnlike2
@@ -754,11 +754,10 @@ class PTSampler(object):
             # annealing schedule (advance beta every iteration)
             if anneal:
                 if custom_anneal:
-                    # beta_schedule defines beta at each iteration
-                    if iter < len(self.beta_schedule):
-                        self.beta = float(self.beta_schedule[iter])
-                    else:
-                        self.beta = float(self.beta_schedule[-1])  # safety fallback
+                    # Use iter-1 so iteration k uses beta_schedule[k]
+                    self.beta = float(
+                        self.beta_schedule[min(iter - 1, len(self.beta_schedule) - 1)]
+                    )
                 else:
                     # linear hold + ramp (existing behavior)
                     if iter <= hold_iter:
