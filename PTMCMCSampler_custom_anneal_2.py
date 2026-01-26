@@ -590,6 +590,7 @@ class PTSampler(object):
 
             # In custom mode, the schedule defines the whole runtime
             Niter_total = int(len(beta_schedule))
+            self.beta_schedule = beta_schedule
             if Niter_total <= 0:
                 raise ValueError("beta_schedule must have positive length.")
             
@@ -600,6 +601,7 @@ class PTSampler(object):
             
         else:
             # existing linear-hold logic (unchanged)
+            self.beta_schedule = None
             ramp_iter = int(anneal_iter) if anneal_iter is not None else int(Niter)
             if ramp_iter <= 0:
                 raise ValueError("anneal_iter must be a positive integer (or None).")
