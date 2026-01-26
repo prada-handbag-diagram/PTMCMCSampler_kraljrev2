@@ -562,10 +562,10 @@ class PTSampler(object):
         """
 
         # Change 4: annealing configuration (Option 1)
+        custom_anneal = (anneal == "custom")
+        linear_anneal = (anneal is True)
+        
         self.disable_pt = bool(anneal)
-        ramp_iter = int(anneal_iter) if anneal_iter is not None else int(Niter)
-        if ramp_iter <= 0:
-            raise ValueError("anneal_iter must be a positive integer (or None).")
 
         post_iter = int(post_iter)
         if post_iter < 0:
@@ -575,7 +575,36 @@ class PTSampler(object):
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0.")
 
-        Niter_total = (hold_iter + ramp_iter + post_iter) if anneal else int(Niter)
+        if custom_anneal:
+            if beta_schedule is None:
+                raise ValueError("anneal='custom' requires beta_schedule (array-like).")
+                
+            beta_schedule = np.asarray(beta_schedule, dtype=float)
+            
+            if beta_schedule.ndim != 1:
+                raise ValueError("beta_schedule must be 1D.")
+            if not np.all(np.isfinite(beta_schedule)):
+                raise ValueError("beta_schedule contains non-finite values.")
+            if np.any(beta_schedule < 0.0) or np.any(beta_schedule > 1.0):
+                raise ValueError("beta_schedule must be in [0,1].")
+
+            # In custom mode, the schedule defines the whole runtime
+            Niter_total = int(len(beta_schedule))
+            if Niter_total <= 0:
+                raise ValueError("beta_schedule must have positive length.")
+            
+            # Optional: ignore hold_iter / anneal_iter / post_iter in custom mode
+            hold_iter = 0
+            ramp_iter = Niter_total
+            post_iter = 0
+            
+        else:
+            # existing linear-hold logic (unchanged)
+            ramp_iter = int(anneal_iter) if anneal_iter is not None else int(Niter)
+            if ramp_iter <= 0:
+                raise ValueError("anneal_iter must be a positive integer (or None).")
+
+            Niter_total = (hold_iter + ramp_iter + post_iter) if anneal else int(Niter)
         
         # Ensure maxIter matches the total number of iterations we will actually run
         if maxIter is None:
@@ -625,14 +654,22 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps,
             )
 
-        # Change 4: set initial beta for annealing
-        if anneal:
+        # Set initial beta for annealing (linear vs custom)
+        if custom_anneal:
+            # schedule defines beta at each iteration; respect resume index i0
+            self.beta = float(self.beta_schedule[min(i0, len(self.beta_schedule) - 1)])
+
+        elif linear_anneal:
             if i0 <= hold_iter:
                 self.beta = 0.0
             elif i0 <= hold_iter + ramp_iter:
                 self.beta = float(i0 - hold_iter) / float(ramp_iter)
             else:
                 self.beta = 1.0
+
+        else:
+            # not annealing => standard posterior (beta=1)
+            self.beta = 1.0
         
         # compute lnprob for initial point in chain
 
