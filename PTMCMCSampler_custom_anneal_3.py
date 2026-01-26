@@ -611,7 +611,13 @@ class PTSampler(object):
         # Ensure maxIter matches the total number of iterations we will actually run
         if maxIter is None:
             maxIter = Niter_total
-        
+            
+        # IMPORTANT: make stopping condition consistent with custom anneal
+        self.Niter = Niter_total
+
+        if custom_anneal and self.resume:
+            raise ValueError("Resuming runs is not supported for anneal='custom'.")
+
         if isave % thin != 0:
             raise ValueError(
                 "isave = %d is not a multiple of thin =  %d" % (isave, thin)
