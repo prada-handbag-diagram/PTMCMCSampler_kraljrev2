@@ -239,12 +239,8 @@ class PTSampler(object):
 
         """
 
-        # Change 3: PT disable guard (activated later when annealing is enabled)
-        if getattr(self, "disable_pt", False) and self.nchain != 1:
-            raise RuntimeError(
-                "Parallel tempering is disabled for this run (annealing mode). "
-                "Run with exactly 1 MPI rank."
-            )
+        # If annealing, we allow multi-rank but we will skip swaps (handled in PTMCMCOneStep)
+        
         
         self.ladder = ladder
         self.covUpdate = covUpdate
@@ -964,11 +960,9 @@ class PTSampler(object):
             return p0, lnlike0, lnprob0, lnlike1, lnprob1, lnlike2, lnprob2
 
         else:
-            # temperature swap
-            if iter % self.Tskip == 0 and self.nchain > 1:
-                p0, lnlike0, lnprob0 = self.PTswap(
-                    p0, lnlike0, lnprob0, iter
-                )  # No temperature swap for MSTI
+            # temperature swap (skip when annealing/PT disabled)
+            if (not getattr(self, "disable_pt", False)) and (iter % self.Tskip == 0) and (self.nchain > 1):
+                p0, lnlike0, lnprob0 = self.PTswap(p0, lnlike0, lnprob0, iter)
 
             self.updateChains(p0, lnlike0, lnprob0, iter)
 
