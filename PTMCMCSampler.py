@@ -749,14 +749,23 @@ class PTSampler(object):
         runComplete = False
         while runComplete is False:
             iter += 1
-            # Change 4: annealing schedule (advance beta every iteration)
+            # annealing schedule (advance beta every iteration)
             if anneal:
-                if iter <= hold_iter:
-                    self.beta = 0.0
-                elif iter <= hold_iter + ramp_iter:
-                    self.beta = float(iter - hold_iter) / float(ramp_iter)
+                if custom_anneal:
+                    # beta_schedule defines beta at each iteration
+                    if iter < len(self.beta_schedule):
+                        self.beta = float(self.beta_schedule[iter])
+                    else:
+                        self.beta = float(self.beta_schedule[-1])  # safety fallback
                 else:
-                    self.beta = 1.0
+                    # linear hold + ramp (existing behavior)
+                    if iter <= hold_iter:
+                        self.beta = 0.0
+                    elif iter <= hold_iter + ramp_iter:
+                        self.beta = float(iter - hold_iter) / float(ramp_iter)
+                    else:
+                        self.beta = 1.0
+                        
                 # Recompute lnprob0 for the CURRENT state at the CURRENT beta
                 if self.n_metaparams == 4:
                     lp0 = self.logp(p0)
