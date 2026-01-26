@@ -251,7 +251,7 @@ class PTSampler(object):
         self.Tskip = Tskip
         self.thin = thin
         self.isave = isave
-        self.Niter = Niter
+        self.Niter = max(self.Niter, Niter)
         self.neff = neff
         self.tstart = 0
 
