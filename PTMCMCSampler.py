@@ -522,6 +522,7 @@ class PTSampler(object):
         hold_iter=0,
         post_iter=0,
         anneal_iter=None,
+        beta_schedule=None
     ):
         """
         Function to carry out PTMCMC sampling.
