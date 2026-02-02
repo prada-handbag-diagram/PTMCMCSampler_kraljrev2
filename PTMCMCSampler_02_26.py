@@ -804,13 +804,13 @@ class PTSampler(object):
         while runComplete is False:
             iter += 1
             # annealing schedule (advance beta every iteration)
-            if anneal:
+            if annealing:
                 if custom_anneal:
                     # Use iter-1 so iteration k uses beta_schedule[k]
                     self.beta = float(
                         self.beta_schedule[min(iter - 1, len(self.beta_schedule) - 1)]
                     )
-                else:
+                elif linear_anneal:
                     # linear hold + ramp (existing behavior)
                     if iter <= hold_iter:
                         self.beta = 0.0
@@ -818,6 +818,8 @@ class PTSampler(object):
                         self.beta = float(iter - hold_iter) / float(ramp_iter)
                     else:
                         self.beta = 1.0
+                else:
+                    raise ValueError("Internal error: annealing enabled but neither custom_anneal nor linear_anneal is True.")
                         
                 # Recompute lnprob0 for the CURRENT state at the CURRENT beta
                 if self.n_metaparams == 4:
