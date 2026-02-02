@@ -1,3 +1,4 @@
+raise ValueError("Resuming runs is not supported for anneal='custom'.")
 import os
 import sys
 import time
@@ -661,7 +662,7 @@ class PTSampler(object):
         self.Niter = Niter_total
 
         if custom_anneal and self.resume:
-            raise ValueError("Resuming runs is not supported for anneal='custom'.")
+            raise ValueError("Resuming runs is not supported for custom beta_schedule.")
 
         if isave % thin != 0:
             raise ValueError(
