@@ -638,19 +638,19 @@ class PTSampler(object):
         else:
             # existing linear-hold logic (unchanged)
             self.beta_schedule = None
-            ramp_iter = int(ramp_iter_from_schedule) if linear_anneal else None
-            if ramp_iter <= 0:
-                raise ValueError("anneal_iter must be a positive integer (or None).")
-            if linear_anneal and ramp_iter <= 0:
-                raise ValueError("Linear beta_schedule ramp length N must be a positive integer.")
+            
+            if linear_anneal:
+                ramp_iter = int(ramp_iter_from_schedule)
+                if ramp_iter <= 0:
+                    raise ValueError("Linear beta_schedule ramp length N must be a positive integer.")
+            else:
+                ramp_iter = None # not used unless linear_anneal
 
             if annealing:
-                if custom_anneal:
-                    Niter_total = int(len(beta_schedule))  # existing custom behavior
-                else:
-                    # linear
-                    Niter_total = int(hold_iter) + int(ramp_iter) + int(post_iter)
+                # linear anneal total runtime
+                Niter_total = int(hold_iter) + int(ramp_iter) + int(post_iter)
             else:
+                # no anneal
                 Niter_total = int(Niter)
         
         # Ensure maxIter matches the total number of iterations we will actually run
