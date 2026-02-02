@@ -1,4 +1,4 @@
-raise ValueError("Resuming runs is not supported for anneal='custom'.")
+
 import os
 import sys
 import time
