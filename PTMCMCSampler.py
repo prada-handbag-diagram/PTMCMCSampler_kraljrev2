@@ -559,11 +559,51 @@ class PTSampler(object):
 
         """
 
-        # Change 4: annealing configuration (Option 1)
-        custom_anneal = (anneal == "custom")
-        linear_anneal = (anneal is True)
+        # --- Annealing UI: beta_schedule is the only switch ---
+        # beta_schedule meanings:
+        #   None                -> no annealing
+        #   array-like          -> custom schedule (length defines runtime)
+        #   ("linear", N)       -> linear schedule; N is ramp length (formerly anneal_iter)
+        #   "linear,N"          -> same as above
         
-        self.disable_pt = bool(anneal)
+        annealing = beta_schedule is not None
+        custom_anneal = False
+        linear_anneal = False
+        ramp_iter_from_schedule = None
+
+        if beta_schedule is None:
+            pass
+
+        elif isinstance(beta_schedule, str):
+            s = beta_schedule.strip().lower()
+            if s.startswith("linear"):
+                linear_anneal = True
+                import re
+                parts = [p for p in re.split(r"[,\s:]+", s) if p]
+                if len(parts) < 2:
+                    raise ValueError("beta_schedule='linear' requires a ramp length, e.g. 'linear,50'.")
+                ramp_iter_from_schedule = int(parts[1])
+            else:
+                raise ValueError(
+                    "beta_schedule as a string must be 'linear,<N>' (e.g. 'linear,50') "
+                    "or provide an array-like schedule."
+                )
+
+        elif isinstance(beta_schedule, (tuple, list)) and len(beta_schedule) >= 1 and isinstance(beta_schedule[0], str):
+            if beta_schedule[0].strip().lower() == "linear":
+                linear_anneal = True
+                if len(beta_schedule) < 2 or beta_schedule[1] is None:
+                    raise ValueError("beta_schedule=('linear', N) requires N (ramp length).")
+                ramp_iter_from_schedule = int(beta_schedule[1])
+            else:
+                raise ValueError("Unsupported beta_schedule tuple/list. Use ('linear', N) or an array-like schedule.")
+
+        else:
+            # otherwise interpret as array-like custom schedule
+            custom_anneal = True
+
+        # Disable PT swaps when annealing is enabled (same behavior as before)
+        self.disable_pt = bool(annealing)
 
         post_iter = int(post_iter)
         if post_iter < 0:
