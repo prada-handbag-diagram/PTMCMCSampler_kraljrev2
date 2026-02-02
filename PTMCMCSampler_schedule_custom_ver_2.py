@@ -625,16 +625,18 @@ class PTSampler(object):
             if np.any(beta_schedule < 0.0) or np.any(beta_schedule > 1.0):
                 raise ValueError("beta_schedule must be in [0,1].")
 
-            # In custom mode, the schedule defines the whole runtime
-            Niter_total = int(len(beta_schedule))
-            self.beta_schedule = beta_schedule
-            if Niter_total <= 0:
-                raise ValueError("beta_schedule must have positive length.")
-            
-            # Optional: ignore hold_iter / anneal_iter / post_iter in custom mode
-            hold_iter = 0
-            ramp_iter = Niter_total
-            post_iter = 0
+            # Build full schedule = hold at 0 + user schedule + hold at 1
+            if beta_schedule.size <= 0:
+                raise ValueError("beta_schedule must be a non-empty 1D array.")
+
+            full_schedule = np.concatenate([
+                np.zeros(hold_iter, dtype=float),
+                beta_schedule.astype(float, copy=False),
+                np.ones(post_iter, dtype=float),
+            ])
+
+            Niter_total = int(len(full_schedule))
+            self.beta_schedule = full_schedule
             
         else:
             # existing linear-hold logic (unchanged)
