@@ -518,10 +518,8 @@ class PTSampler(object):
         hotChain=False,
         model_param_idx=None,
         nameChainTemps=False,
-        anneal=False,
         hold_iter=0,
         post_iter=0,
-        anneal_iter=None,
         beta_schedule=None
     ):
         """
