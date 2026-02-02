@@ -614,8 +614,6 @@ class PTSampler(object):
             raise ValueError("hold_iter must be >= 0.")
 
         if custom_anneal:
-            if beta_schedule is None:
-                raise ValueError("anneal='custom' requires beta_schedule (array-like).")
                 
             beta_schedule = np.asarray(beta_schedule, dtype=float)
             
