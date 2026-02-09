@@ -265,6 +265,7 @@ class PTSampler(object):
         self._lnprob = np.zeros(N)
         self._lnlike = np.zeros(N)
         self._chain = np.zeros((N, self.ndim))
+        self._beta = np.zeros(N)
         self.ind_next_write = 0  # Next index in these arrays to write out
         self.naccepted = 0
         self.swapProposed = 0
@@ -437,10 +438,11 @@ class PTSampler(object):
         if iter % self.thin == 0:
             ind = int(iter / self.thin)
             self._chain[ind, :] = p0
+            self._beta[ind] = self.beta
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
 
-            if lnlike1 and lnlike2 and lnprob1 and lnprob2:
+            if (lnlike1 is not None) and (lnlike2 is not None) and (lnprob1 is not None) and (lnprob2 is not None):
                 self._lnlike1[ind] = lnlike1
                 self._lnprob1[ind] = lnprob1
                 self._lnlike2[ind] = lnlike2
@@ -681,8 +683,6 @@ class PTSampler(object):
             p0 = self.resumechain[0, 1 : -self.n_metaparams]
             lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[0, -self.n_metaparams]
-            
-            lnprob0 = self.resumechain[0, -self.n_metaparams]
 
             if self.modelswitch:
                 lnlike1 = self.resumechain[0, -(self.n_metaparams - 3)]
@@ -866,11 +866,13 @@ class PTSampler(object):
         # if resuming, just use previous chain points.  Use each one thin times to compensate for
         # thinning when they were written out
         if self.resume and self.resumeLength > 0 and iter < self.resumeLength * self.thin:
-            p0, lnlike0, lnprob0 = (
-                self.resumechain[iter // self.thin, : -self.n_metaparams],
-                self.resumechain[iter // self.thin, -(self.n_metaparams - 1)],
-                self.resumechain[iter // self.thin, -self.n_metaparams]
-            )
+            row = iter // self.thin
+
+            # Column 0 is beta, parameters start at column 1
+            self.beta = self.resumechain[row, 0]
+            p0 = self.resumechain[row, 1 : -self.n_metaparams]
+            lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
+            lnprob0 = self.resumechain[row, -self.n_metaparams]
 
             if self.modelswitch:
                 lnlike1 = self.resumechain[iter // self.thin, -(self.n_metaparams - 3)]
@@ -1100,6 +1102,10 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
+            # beta first
+            self._chainfile.write("%f\t" % self._beta[ind])
+
+            # then parameters
             self._chainfile.write("\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)]))
             self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
 
