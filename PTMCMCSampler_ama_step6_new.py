@@ -908,6 +908,9 @@ class PTSampler(object):
                 lnlike2 = self.resumechain[row, -(self.n_metaparams - 5)]
                 lnprob2 = self.resumechain[row, -(self.n_metaparams - 4)]
 
+            if getattr(self, "beta_schedule", None) is not None and self.MPIrank == 0 and iter % (10 * self.thin) == 0:
+                print(f"[debug] iter={iter} beta={self.beta:.6f}")
+            
             # update acceptance counter
             self.naccepted = iter * self.resumechain[row, -2]
         else:
