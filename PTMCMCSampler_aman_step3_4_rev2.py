@@ -390,6 +390,9 @@ class PTSampler(object):
                 print("Resuming run from chain file {0}".format(self.fname))
             try:
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
+                expected_cols = 1 + self.ndim + self.n_metaparams
+                if self.resumechain.shape[1] != expected_cols:
+                    raise Exception(f"Old chain format: expected {expected_cols} columns (beta+params+meta), got {self.resumechain.shape[1]}")
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
             except ValueError as error:
                 print("Reading old chain files failed with error", error)
@@ -875,10 +878,10 @@ class PTSampler(object):
             lnprob0 = self.resumechain[row, -self.n_metaparams]
 
             if self.modelswitch:
-                lnlike1 = self.resumechain[iter // self.thin, -(self.n_metaparams - 3)]
-                lnprob1 = self.resumechain[iter // self.thin, -(self.n_metaparams - 2)]
-                lnlike2 = self.resumechain[iter // self.thin, -(self.n_metaparams - 5)]
-                lnprob2 = self.resumechain[iter // self.thin, -(self.n_metaparams - 4)]
+                self.beta = self.resumechain[row, 0]
+                p0 = self.resumechain[row, 1 : -self.n_metaparams]
+                lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
+                lnprob0 = self.resumechain[row, -self.n_metaparams]
 
             # update acceptance counter
             self.naccepted = iter * self.resumechain[iter // self.thin, -2]
