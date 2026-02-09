@@ -888,7 +888,8 @@ class PTSampler(object):
             row = iter // self.thin
 
             # Column 0 is beta, parameters start at column 1
-            self.beta = self.resumechain[row, 0]
+            if getattr(self, "beta_schedule", None) is None:
+                self.beta = self.resumechain[row, 0]
             p0 = self.resumechain[row, 1 : -self.n_metaparams]
             lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[row, -self.n_metaparams]
