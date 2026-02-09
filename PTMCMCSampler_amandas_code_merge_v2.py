@@ -621,9 +621,7 @@ class PTSampler(object):
 
             self.beta_schedule = full
 
-            # runtime is exactly the schedule length (stop when beta reaches end)
-            Niter = int(full.size)
-            
+            # runtime is exactly the schedule length (stop when beta reaches end)  
             Niter = int(full.size)
             if not user_set_maxIter:
                 maxIter = Niter
@@ -678,8 +676,12 @@ class PTSampler(object):
 
         # if resuming, just start with first point in chain  ### originally set to 0, now -1
         if self.resume and self.resumeLength > 0:
-            p0 = self.resumechain[0, : -self.n_metaparams]
+            # Column 0 will be beta in the chain file format (see _writeToFile)
+            self.beta = self.resumechain[0, 0]
+            p0 = self.resumechain[0, 1 : -self.n_metaparams]
             lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
+            lnprob0 = self.resumechain[0, -self.n_metaparams]
+            
             lnprob0 = self.resumechain[0, -self.n_metaparams]
 
             if self.modelswitch:
