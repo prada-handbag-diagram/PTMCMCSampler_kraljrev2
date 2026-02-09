@@ -575,6 +575,9 @@ class PTSampler(object):
 
         scheduling_active = beta_schedule is not None
         if scheduling_active:
+            if hotChain:
+                raise ValueError("hotChain is not compatible with beta_schedule runs")
+            
             # For now: do not allow resume with beta scheduling (schedule-driven length)
             if self.resume:
                 raise ValueError("resume=True is not supported when beta_schedule is used")
@@ -864,8 +867,11 @@ class PTSampler(object):
             # randomize cycle
             self.randomizeProposalCycle()
 
-        # Apply beta schedule
-
+        idx = iter - 1
+        if idx < 0 or idx >= len(self.beta_schedule):
+            raise IndexError(f"beta_schedule index out of range: idx={idx}, len={len(self.beta_schedule)}")
+        self.beta = float(self.beta_schedule[idx])
+        
         # Recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
             self.beta = float(self.beta_schedule[iter - 1])
@@ -1104,10 +1110,10 @@ class PTSampler(object):
 
     def _writeToFile(self, iter):
         """
-        Function to write chain file. File has ndim+4 columns,
+        Function to write chain file. File has ndim+5 columns,
         appended to the parameter values are log-posterior (unnormalized),
         log-likelihood, acceptance rate, and PT acceptance rate. If doing modelswitch
-        there are an additional 4 colums (ndim+8 total), log-posterior of model
+        there are an additional 4 colums (ndim+9 total), log-posterior of model
         1, log-likelihood of model 1, log-posterior of model 2, and
         log-likelihood of model 2.
         Rates are as of time of writing.
