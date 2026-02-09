@@ -865,8 +865,6 @@ class PTSampler(object):
             self.randomizeProposalCycle()
 
         # Apply beta schedule
-        if getattr(self, "beta_schedule", None) is not None:
-            self.beta = float(self.beta_schedule[iter - 1])
 
         # Recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
