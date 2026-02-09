@@ -734,6 +734,22 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
+        # If beta_schedule is active, make the initial (iter=0) sample consistent with the schedule
+        if getattr(self, "beta_schedule", None) is not None:
+            self.beta = float(self.beta_schedule[0])
+
+            if not self.modelswitch:
+                lp0 = self.logp(p0)
+                if lp0 == -np.inf or (not np.isfinite(lnlike0)):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lp0
+            else:
+                if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lnprob2
+        
         if not self.modelswitch:
             # record first values
             self.updateChains(p0, lnlike0, lnprob0, i0)
