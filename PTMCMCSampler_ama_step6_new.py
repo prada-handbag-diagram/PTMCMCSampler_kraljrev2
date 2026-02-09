@@ -866,15 +866,15 @@ class PTSampler(object):
 
             # randomize cycle
             self.randomizeProposalCycle()
-
-        idx = iter - 1
-        if idx < 0 or idx >= len(self.beta_schedule):
-            raise IndexError(f"beta_schedule index out of range: idx={idx}, len={len(self.beta_schedule)}")
-        self.beta = float(self.beta_schedule[idx])
         
         # Recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
-            self.beta = float(self.beta_schedule[iter - 1])
+            idx = iter - 1
+            if idx < 0 or idx >= len(self.beta_schedule):
+                raise IndexError(
+                    f"beta_schedule index out of range: idx={idx}, len={len(self.beta_schedule)}"
+                )
+            self.beta = float(self.beta_schedule[idx])
 
             if not self.modelswitch:
                 lp0 = self.logp(p0)
