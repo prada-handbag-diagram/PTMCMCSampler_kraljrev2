@@ -710,12 +710,12 @@ class PTSampler(object):
                 lp2 = self.logp2(p0)
 
                 if lp1 == -np.inf or lp2 == -np.inf:
-                    lnprob0 = 0  ### why not -inf?
-                    lnlike0 = 0
-                    lnlike1 = 0
-                    lnprob1 = 0
-                    lnlike2 = 0
-                    lnprob2 = 0
+                    lnprob0 = -np.inf
+                    lnlike0 = -np.inf
+                    lnlike1 = -np.inf
+                    lnprob1 = -np.inf
+                    lnlike2 = -np.inf
+                    lnprob2 = -np.inf
 
                 else:
                     lnlike1 = self.logl1(p0) 
@@ -954,8 +954,8 @@ class PTSampler(object):
 
         else:
             # temperature swap
-            if iter % self.Tskip == 0 and self.nchain > 1:
-                p0, lnlike0, lnprob0 = self.PTswap(p0, lnlike0, lnprob0, iter)  # No temperature swap for modelswitch
+            if (not getattr(self, "disable_pt", False)) and (iter % self.Tskip == 0) and (self.nchain > 1):
+                p0, lnlike0, lnprob0 = self.PTswap(p0, lnlike0, lnprob0, iter)
 
             self.updateChains(p0, lnlike0, lnprob0, iter)
 
