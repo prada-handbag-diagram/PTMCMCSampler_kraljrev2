@@ -240,6 +240,7 @@ class PTSampler(object):
 
 
         """
+        
         # get maximum number of iteration
         if maxIter is None and self.MPIrank > 0:
             maxIter = Niter
@@ -551,6 +552,8 @@ class PTSampler(object):
         @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
 
         """
+
+        user_set_maxIter = (maxIter is not None)
         #print('sampler started')
         # get maximum number of iteration
         if maxIter is None and self.MPIrank > 0:
@@ -620,9 +623,9 @@ class PTSampler(object):
 
             # runtime is exactly the schedule length (stop when beta reaches end)
             Niter = int(full.size)
-
-            # For safety, set maxIter consistently too
-            if maxIter is None:
+            
+            Niter = int(full.size)
+            if not user_set_maxIter:
                 maxIter = Niter
 
             if self.MPIrank == 0 and self.verbose:
