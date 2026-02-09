@@ -864,6 +864,24 @@ class PTSampler(object):
             # randomize cycle
             self.randomizeProposalCycle()
 
+        # Apply beta schedule
+        if getattr(self, "beta_schedule", None) is not None:
+            self.beta = float(self.beta_schedule[iter - 1])
+
+        # Recompute lnprob0 under current beta
+        if getattr(self, "beta_schedule", None) is not None:
+            if not self.modelswitch:
+                lp0 = self.logp(p0)
+                if lp0 == -np.inf or not np.isfinite(lnlike0):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lp0
+            else:
+                if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lnprob2
+        
         # jump proposal ###
 
         # if resuming, just use previous chain points.  Use each one thin times to compensate for
@@ -878,13 +896,13 @@ class PTSampler(object):
             lnprob0 = self.resumechain[row, -self.n_metaparams]
 
             if self.modelswitch:
-                self.beta = self.resumechain[row, 0]
-                p0 = self.resumechain[row, 1 : -self.n_metaparams]
-                lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
-                lnprob0 = self.resumechain[row, -self.n_metaparams]
+                lnlike1 = self.resumechain[row, -(self.n_metaparams - 3)]
+                lnprob1 = self.resumechain[row, -(self.n_metaparams - 2)]
+                lnlike2 = self.resumechain[row, -(self.n_metaparams - 5)]
+                lnprob2 = self.resumechain[row, -(self.n_metaparams - 4)]
 
             # update acceptance counter
-            self.naccepted = iter * self.resumechain[iter // self.thin, -2]
+            self.naccepted = iter * self.resumechain[row, -2]
         else:
             y, qxy, jump_name = self._jump(p0, iter)  # made a jump
             self.jumpDict[jump_name][0] += 1
