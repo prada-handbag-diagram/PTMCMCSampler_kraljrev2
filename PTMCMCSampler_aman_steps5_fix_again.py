@@ -867,7 +867,6 @@ class PTSampler(object):
         # Apply beta schedule
 
         # Recompute lnprob0 under current beta
-        # Apply beta schedule + recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
             self.beta = float(self.beta_schedule[iter - 1])
 
