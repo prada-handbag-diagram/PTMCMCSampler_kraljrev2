@@ -867,7 +867,10 @@ class PTSampler(object):
         # Apply beta schedule
 
         # Recompute lnprob0 under current beta
+        # Apply beta schedule + recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
+            self.beta = float(self.beta_schedule[iter - 1])
+
             if not self.modelswitch:
                 lp0 = self.logp(p0)
                 if lp0 == -np.inf or not np.isfinite(lnlike0):
