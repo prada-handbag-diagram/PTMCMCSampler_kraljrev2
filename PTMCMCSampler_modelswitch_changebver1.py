@@ -684,9 +684,17 @@ class PTSampler(object):
 
         # if resuming, just start with first point in chain  ### originally set to 0, now -1
         if self.resume and self.resumeLength > 0:
-            # Column 0 will be beta in the chain file format (see _writeToFile)
-            self.beta = self.resumechain[0, 0]
-            p0 = self.resumechain[0, 1 : -self.n_metaparams]
+
+            param_start = 1 if self.write_beta_col else 0
+
+            if self.write_beta_col:
+                self.beta = self.resumechain[0, 0]
+            else:
+                # legacy format — beta comes from ladder
+                self.beta = self.ladder[self.MPIrank]
+
+            p0 = self.resumechain[0, param_start : param_start + self.ndim]
+            
             lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[0, -self.n_metaparams]
 
@@ -911,10 +919,15 @@ class PTSampler(object):
         if self.resume and self.resumeLength > 0 and iter < self.resumeLength * self.thin:
             row = iter // self.thin
 
-            # Column 0 is beta, parameters start at column 1
-            if getattr(self, "beta_schedule", None) is None:
+            param_start = 1 if self.write_beta_col else 0
+
+            if self.write_beta_col:
                 self.beta = self.resumechain[row, 0]
-            p0 = self.resumechain[row, 1 : -self.n_metaparams]
+            else:
+                self.beta = self.ladder[self.MPIrank]
+
+            p0 = self.resumechain[row, param_start : param_start + self.ndim]
+            
             lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
             lnprob0 = self.resumechain[row, -self.n_metaparams]
 
