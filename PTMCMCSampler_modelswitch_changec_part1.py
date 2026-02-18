@@ -217,6 +217,8 @@ class PTSampler(object):
         neff=None,
         writeHotChains=False,
         hotChain=False,
+        beta_schedule=None,
+        hold_iter=0,
         nameChainTemps=False
     ):
         """
@@ -253,11 +255,73 @@ class PTSampler(object):
 
 
         """
-        
-        # get maximum number of iteration
-        if maxIter is None and self.MPIrank > 0:
-            maxIter = Niter
-        elif maxIter is None and self.MPIrank == 0:
+
+        # Varying-beta scheduling
+        self.beta_schedule = None
+        self.disable_pt = False
+
+        if hold_iter < 0:
+            raise ValueError("hold_iter must be >= 0")
+
+        scheduling_active = beta_schedule is not None
+        if scheduling_active:
+            if hotChain:
+                raise ValueError("hotChain is not compatible with beta_schedule runs")
+            if self.resume:
+                raise ValueError("resume=True is not supported when beta_schedule is used")
+            if ladder is not None:
+                raise ValueError("beta_schedule is not compatible with a user-provided ladder")
+            if self.nchain > 1:
+                raise ValueError("beta_schedule is only supported for single-chain runs (MPI size must be 1)")
+
+            self.disable_pt = True
+
+            # Parse beta_schedule and build full schedule
+            beta_core = None
+
+            if isinstance(beta_schedule, tuple):
+                if len(beta_schedule) != 2:
+                    raise ValueError("beta_schedule tuple must be ('linear', N)")
+                mode, n_ramp = beta_schedule
+                if mode != "linear":
+                    raise ValueError("Only ('linear', N) is supported for tuple beta_schedule")
+                n_ramp = int(n_ramp)
+                if n_ramp <= 0:
+                    raise ValueError("Linear beta_schedule ramp length N must be > 0")
+                beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
+
+            elif isinstance(beta_schedule, str):
+                parts = beta_schedule.split(",")
+                if len(parts) == 2 and parts[0].strip() == "linear":
+                    n_ramp = int(parts[1].strip())
+                    if n_ramp <= 0:
+                        raise ValueError("Linear beta_schedule ramp length N must be > 0")
+                    beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
+                else:
+                    raise ValueError("String beta_schedule must be 'linear,N'")
+
+            else:
+                beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
+
+            hold = np.zeros(int(hold_iter), dtype=float)
+            full = np.concatenate([hold, beta_core])
+
+            if full.ndim != 1 or full.size == 0:
+                raise ValueError("beta_schedule produced an empty schedule")
+            if not np.all(np.isfinite(full)):
+                raise ValueError("beta_schedule contains non-finite values")
+            if np.min(full) < 0.0 or np.max(full) > 1.0:
+                raise ValueError("beta_schedule values must lie in [0, 1]")
+
+            self.beta_schedule = full
+
+            # Override Niter/maxIter based on schedule
+            Niter = int(full.size)
+            if maxIter is None:
+                maxIter = Niter
+
+        # Default maxIter for non-scheduled runs
+        if maxIter is None:
             maxIter = Niter
 
         self.ladder = ladder
@@ -557,35 +621,6 @@ class PTSampler(object):
         @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
 
         """
-
-        user_set_maxIter = (maxIter is not None)
-        #print('sampler started')
-        # get maximum number of iteration
-        if maxIter is None and self.MPIrank > 0:
-            maxIter = Niter
-        elif maxIter is None and self.MPIrank == 0:
-            maxIter = Niter
-
-        # Beta scheduling
-        self.beta_schedule = None
-        self.disable_pt = False  # used to skip PTswap when scheduling is active
-
-        if hold_iter < 0:
-            raise ValueError("hold_iter must be >= 0")
-
-        scheduling_active = beta_schedule is not None
-        if scheduling_active:
-            if hotChain:
-                raise ValueError("hotChain is not compatible with beta_schedule runs")
-            
-            # For now: do not allow resume with beta scheduling (schedule-driven length)
-            if self.resume:
-                raise ValueError("resume=True is not supported when beta_schedule is used")
-
-            self.disable_pt = True
-
-            # Parse beta_schedule
-            beta_core = None
 
             # Accept ("linear", N) or "linear,N"
             if isinstance(beta_schedule, tuple):
