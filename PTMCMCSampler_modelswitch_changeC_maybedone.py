@@ -113,7 +113,7 @@ class PTSampler(object):
 
         self.ndim = ndim
 
-        # Infer model-switching from the *type* of logl/logp (no user-facing flag).
+        # Infer model-switching from the *type* of logl/logp (no user-facing flag)
         logl_is_tuple = isinstance(logl, tuple)
         logp_is_tuple = isinstance(logp, tuple)
 
@@ -270,9 +270,12 @@ class PTSampler(object):
             if self.resume:
                 raise ValueError("resume=True is not supported when beta_schedule is used")
             if ladder is not None:
-                raise ValueError("beta_schedule is not compatible with a user-provided ladder")
+                raise ValueError(f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs.")
             if self.nchain > 1:
-                raise ValueError("beta_schedule is only supported for single-chain runs (MPI size must be 1)")
+                raise ValueError(
+                    f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
+                    "Run without MPI or use a single MPI process."
+                )
 
             self.disable_pt = True
 
