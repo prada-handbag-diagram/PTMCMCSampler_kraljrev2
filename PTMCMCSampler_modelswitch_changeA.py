@@ -119,10 +119,10 @@ class PTSampler(object):
 
         # Must match: either both tuples (modelswitch) or both single callables (normal sampling)
         if logl_is_tuple != logp_is_tuple:
-                raise ValueError(
-                    "Model-switching requires BOTH logl and logp to be tuples. "
-                    "You provided a tuple for one but not the other."
-                )
+            raise ValueError(
+                "Model-switching requires BOTH logl and logp to be tuples. "
+                "You provided a tuple for one but not the other."
+            )
 
         self.modelswitch = logl_is_tuple
 
@@ -286,8 +286,9 @@ class PTSampler(object):
         self.n_metaparams = 4
 
 
+        self.n_metaparams = 8 if self.modelswitch else 4
+
         if self.modelswitch:
-            self.n_metaparams = 8
             self._lnprob1 = np.zeros(N)
             self._lnlike1 = np.zeros(N)
             self._lnprob2 = np.zeros(N)
@@ -519,7 +520,6 @@ class PTSampler(object):
         hotChain=False,
         beta_schedule=None,
         hold_iter=0,
-        modelswitch=False,
         nameChainTemps=False,
     ):
         """
@@ -553,7 +553,6 @@ class PTSampler(object):
         @param neff: Number of effective samples to collect before terminating
         @param writeHotChains: Writes out the hot chain (default=False)
         @param hotChain: Beta=0 (previously Temp=1e80) (default=False)
-        @param modelswitch: Indicates whether or not to use Model-Switch (default=False)
         @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
 
         """
@@ -676,7 +675,6 @@ class PTSampler(object):
                 neff=neff,
                 writeHotChains=writeHotChains,
                 hotChain=hotChain,
-                modelswitch=modelswitch,
                 nameChainTemps=nameChainTemps
             )
 
