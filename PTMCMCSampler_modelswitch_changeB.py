@@ -275,7 +275,6 @@ class PTSampler(object):
         
         # Output/resume format flags (preserve legacy format unless feature is active)
         self.write_beta_col = (self.beta_schedule is not None)
-        self.write_model_cols = self.modelswitch
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
