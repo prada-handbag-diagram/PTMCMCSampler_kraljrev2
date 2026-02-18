@@ -272,6 +272,10 @@ class PTSampler(object):
         self.Niter = Niter
         self.neff = neff
         self.tstart = 0
+        
+        # Output/resume format flags (preserve legacy format unless feature is active)
+        self.write_beta_col = (self.beta_schedule is not None)
+        self.write_model_cols = self.modelswitch
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
@@ -283,8 +287,6 @@ class PTSampler(object):
         self.naccepted = 0
         self.swapProposed = 0
         self.nswap_accepted = 0
-        self.n_metaparams = 4
-
 
         self.n_metaparams = 8 if self.modelswitch else 4
 
@@ -391,7 +393,7 @@ class PTSampler(object):
                 print("Resuming run from chain file {0}".format(self.fname))
             try:
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
-                expected_cols = 1 + self.ndim + self.n_metaparams
+                expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
                     raise Exception(f"Old chain format: expected {expected_cols} columns (beta+params+meta), got {self.resumechain.shape[1]}")
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
@@ -1147,12 +1149,14 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
-            # beta first
-            self._chainfile.write("%f\t" % self._beta[ind])
+            # beta column only for varying-beta runs
+            if self.write_beta_col:
+                self._chainfile.write("%f\t" % self._beta[ind])
 
-            # then parameters
-            self._chainfile.write("\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)]))
-            self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
+            # then parameters (always)
+            self._chainfile.write(
+                "\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)])
+            )
 
             if self.modelswitch:
                 self._chainfile.write(
