@@ -324,6 +324,15 @@ class PTSampler(object):
         if maxIter is None:
             maxIter = Niter
 
+        if isave % thin != 0:
+            raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
+
+        if Niter % thin != 0:
+            print(
+                "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
+                % (Niter, thin, Niter % thin)
+            )
+
         self.ladder = ladder
         self.covUpdate = covUpdate
         self.SCAMweight = SCAMweight
@@ -627,15 +636,6 @@ class PTSampler(object):
 
         """        
 
-        if isave % thin != 0:
-            raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
-
-        if Niter % thin != 0:
-            print(
-                "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
-                % (Niter, thin, Niter % thin)
-            )
-
         # set up arrays to store lnprob, lnlike and chain
         # if picking up from previous run, don't re-initialize
         if i0 == 0:
@@ -664,6 +664,8 @@ class PTSampler(object):
                 i0=i0,
                 neff=neff,
                 writeHotChains=writeHotChains,
+                beta_schedule=beta_schedule,
+                hold_iter=hold_iter,
                 hotChain=hotChain,
                 nameChainTemps=nameChainTemps
             )
