@@ -414,24 +414,29 @@ class PTSampler(object):
         # randomize cycle
         self.randomizeProposalCycle()
 
-        # if ladder given check if in temp or beta
-        if self.ladder:
-            if any(self.ladder) > 1:
-                # user gave temperatures >>> convert to beta
-                self.ladder = [1 / temp for temp in self.ladder]
-
-        # ladder not specified, create one
+        # Ladder setup
+        if scheduling_active:
+            # varying-beta run: no PT ladder
+            self.ladder = np.array([1.0])
         else:
-            # If temperatures are used, convert to beta
-            if Tmin:  # used temperatures
-                Bmax = 1 / Tmin  # Tmin is typically 1
-            if Tmax:
-                Bmin = 1 / Tmax
+            # if ladder given check if in temp or beta
+            if self.ladder:
+                if any(self.ladder) > 1:
+                    # user gave temperatures >>> convert to beta
+                    self.ladder = [1 / temp for temp in self.ladder]
 
-            self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+            # ladder not specified, create one
+            else:
+                # If temperatures are used, convert to beta
+                if Tmin:  # used temperatures
+                    Bmax = 1 / Tmin  # Tmin is typically 1
+                if Tmax:
+                    Bmin = 1 / Tmax
 
-        # beta for current chain
-        self.beta = self.ladder[self.MPIrank]
+                self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+
+            # beta for current chain (only meaningful for PT runs)
+            self.beta = self.ladder[self.MPIrank]
 
         # Name chain files
         if hotChain and self.MPIrank == self.nchain - 1:
@@ -620,58 +625,7 @@ class PTSampler(object):
         @param hotChain: Beta=0 (previously Temp=1e80) (default=False)
         @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
 
-        """
-
-            # Accept ("linear", N) or "linear,N"
-            if isinstance(beta_schedule, tuple):
-                if len(beta_schedule) != 2:
-                    raise ValueError("beta_schedule tuple must be ('linear', N)")
-                mode, n_ramp = beta_schedule
-                if mode != "linear":
-                    raise ValueError("Only ('linear', N) is supported for tuple beta_schedule")
-                n_ramp = int(n_ramp)
-                if n_ramp <= 0:
-                    raise ValueError("Linear beta_schedule ramp length N must be > 0")
-                beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
-
-            elif isinstance(beta_schedule, str):
-                # "linear,N"
-                parts = beta_schedule.split(",")
-                if len(parts) == 2 and parts[0].strip() == "linear":
-                    n_ramp = int(parts[1].strip())
-                    if n_ramp <= 0:
-                        raise ValueError("Linear beta_schedule ramp length N must be > 0")
-                    beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
-                else:
-                    raise ValueError("String beta_schedule must be 'linear,N'")
-
-            else:
-                # array-like custom schedule
-                beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
-
-            # Build full schedule = [0...0] + beta_core
-            hold = np.zeros(int(hold_iter), dtype=float)
-            full = np.concatenate([hold, beta_core])
-
-            if full.ndim != 1 or full.size == 0:
-                raise ValueError("beta_schedule produced an empty schedule")
-
-            if not np.all(np.isfinite(full)):
-                raise ValueError("beta_schedule contains non-finite values")
-
-            if np.min(full) < 0.0 or np.max(full) > 1.0:
-                raise ValueError("beta_schedule values must lie in [0, 1]")
-
-            self.beta_schedule = full
-
-            # runtime is exactly the schedule length (stop when beta reaches end)  
-            Niter = int(full.size)
-            if not user_set_maxIter:
-                maxIter = Niter
-
-            if self.MPIrank == 0 and self.verbose:
-                print(f"[beta_schedule] Option A active: total iterations set to {Niter} (hold_iter={hold_iter})")
-            
+        """        
 
         if isave % thin != 0:
             raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
