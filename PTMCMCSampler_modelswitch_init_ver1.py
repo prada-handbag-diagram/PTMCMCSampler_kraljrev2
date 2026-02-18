@@ -113,18 +113,33 @@ class PTSampler(object):
 
         self.ndim = ndim
 
-        # if 2 loglikelihood functions and 2 log prior functions are supplied (modelswitch)
-        if (type(logl) is tuple) and (type(logp) is tuple):
+        # Infer model-switching from the *type* of logl/logp (no user-facing flag).
+        logl_is_tuple = isinstance(logl, tuple)
+        logp_is_tuple = isinstance(logp, tuple)
+
+        # Must match: either both tuples (modelswitch) or both single callables (normal sampling)
+        if logl_is_tuple != logp_is_tuple:
+                raise ValueError(
+                    "Model-switching requires BOTH logl and logp to be tuples. "
+                    "You provided a tuple for one but not the other."
+                )
+
+        self.modelswitch = logl_is_tuple
+
+        if self.modelswitch:
+            # This code assumes exactly two models
+            if len(logl) != 2 or len(logp) != 2:
+                raise ValueError(
+                    "For model-switching, logl and logp must be tuples of length 2."
+                )
+
+            # Keep your existing mapping (your code treats index 1 as model 1)
             self.logl1 = _function_wrapper(logl[1], loglargs, loglkwargs)
-            self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs) 
-            self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs) 
+            self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs)
+            self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs)
             self.logp2 = _function_wrapper(logp[0], logpargs, logpkwargs)
-        elif (type(logl) is tuple) or (type(logp) is tuple):
-            raise ValueError(
-                "You provided a tuple for either the loglikelihood or log prior but not the other."
-                "If you are using modelswitch make sure both are tuples."
-            )
-        else:  # only 1 loglikelihood and 1 log prior provided
+
+        else:
             self.logl = _function_wrapper(logl, loglargs, loglkwargs)
             self.logp = _function_wrapper(logp, logpargs, logpkwargs)
 
@@ -202,7 +217,6 @@ class PTSampler(object):
         neff=None,
         writeHotChains=False,
         hotChain=False,
-        modelswitch=False,
         nameChainTemps=False
     ):
         """
@@ -235,7 +249,6 @@ class PTSampler(object):
         @param neff: Number of effective samples to collect before terminating
         @param writeHotChains: Writes out the hot chain (default=False)
         @param hotChain: Beta=0 (previously Temp=1e80) (default=False)
-        @param modelswitch: Indicates whether or not to use Model-Switch (default=False)
         @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
 
 
@@ -271,22 +284,9 @@ class PTSampler(object):
         self.swapProposed = 0
         self.nswap_accepted = 0
         self.n_metaparams = 4
-        self.modelswitch = modelswitch
 
-        if not self.modelswitch:
-            if hasattr(self, "logl1"):
-                raise ValueError(
-                    "You have provided a likelihood and a prior function for two models but have"
-                    " indicated that modelswitch should not be performed."
-                )
 
         if self.modelswitch:
-            if hasattr(self, "logl"):
-                raise ValueError(
-                    "You have indicated that modelswitch should be performed but have only provided"
-                    " one likelihood and one prior function. For modelswitch you must supply one of each"
-                    " for each model."
-                )
             self.n_metaparams = 8
             self._lnprob1 = np.zeros(N)
             self._lnlike1 = np.zeros(N)
