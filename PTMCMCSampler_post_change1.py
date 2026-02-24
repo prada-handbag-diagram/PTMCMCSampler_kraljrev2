@@ -427,18 +427,22 @@ class PTSampler(object):
             self.beta = self.ladder[self.MPIrank]
 
         # Name chain files
-        if hotChain and self.MPIrank == self.nchain - 1:
-            self.beta = 0  # This is the "hot chain"
-            if nameChainTemps:  # if you prefer the old naming scheme
-                self.fname = self.outDir + "/chain_hot.txt"
+        if scheduling_active:
+            # beta changes over time, fixed filename for scheduled runs
+            self.fname = self.outDir + "/chain_schedule.txt"
+        else:
+            if hotChain and self.MPIrank == self.nchain - 1:
+                self.beta = 0  # This is the "hot chain"
+                if nameChainTemps:  # if you prefer the old naming scheme
+                    self.fname = self.outDir + "/chain_hot.txt"
             else:  # new naming scheme with beta
                 self.fname = self.outDir + "/chain_0.txt"
 
-        elif nameChainTemps:  # if you prefer the old naming scheme
-            self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
+            elif nameChainTemps:  # if you prefer the old naming scheme
+                self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
 
-        else:  # new naming scheme with beta
-            self.fname = self.outDir + "/chain_{0}.txt".format(self.beta)
+            else:  # new naming scheme with beta
+                self.fname = self.outDir + "/chain_{0}.txt".format(self.beta)
 
         # write hot chains
         self.writeHotChains = writeHotChains
