@@ -584,35 +584,9 @@ class PTSampler(object):
 
             self.disable_pt = True
 
-            # Parse beta_schedule
-            beta_core = None
-
-            # Accept ("linear", N) or "linear,N"
-            if isinstance(beta_schedule, tuple):
-                if len(beta_schedule) != 2:
-                    raise ValueError("beta_schedule tuple must be ('linear', N)")
-                mode, n_ramp = beta_schedule
-                if mode != "linear":
-                    raise ValueError("Only ('linear', N) is supported for tuple beta_schedule")
-                n_ramp = int(n_ramp)
-                if n_ramp <= 0:
-                    raise ValueError("Linear beta_schedule ramp length N must be > 0")
-                beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
-
-            elif isinstance(beta_schedule, str):
-                # "linear,N"
-                parts = beta_schedule.split(",")
-                if len(parts) == 2 and parts[0].strip() == "linear":
-                    n_ramp = int(parts[1].strip())
-                    if n_ramp <= 0:
-                        raise ValueError("Linear beta_schedule ramp length N must be > 0")
-                    beta_core = np.linspace(0.0, 1.0, n_ramp, endpoint=True)
-                else:
-                    raise ValueError("String beta_schedule must be 'linear,N'")
-
-            else:
-                # array-like custom schedule
-                beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
+            # Parse beta_schedule as array-like custom schedule
+            beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
+            
 
             # Build full schedule = [0...0] + beta_core
             hold = np.zeros(int(hold_iter), dtype=float)
