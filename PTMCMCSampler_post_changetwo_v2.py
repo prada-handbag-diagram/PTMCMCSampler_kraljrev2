@@ -408,8 +408,8 @@ class PTSampler(object):
             self.ladder = np.array([1.0])
         else:
             # if ladder given check if in temp or beta
-            if self.ladder:
-                if any(self.ladder) > 1:
+            if self.ladder is not None and len(self.ladder) > 0:
+                if max(self.ladder) > 1:
                     # user gave temperatures >>> convert to beta
                     self.ladder = [1 / temp for temp in self.ladder]
 
