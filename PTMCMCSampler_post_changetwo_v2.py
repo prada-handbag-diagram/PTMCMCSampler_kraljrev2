@@ -435,8 +435,8 @@ class PTSampler(object):
                 self.beta = 0  # This is the "hot chain"
                 if nameChainTemps:  # if you prefer the old naming scheme
                     self.fname = self.outDir + "/chain_hot.txt"
-            else:  # new naming scheme with beta
-                self.fname = self.outDir + "/chain_0.txt"
+                else:  # new naming scheme with beta
+                    self.fname = self.outDir + "/chain_0.txt"
 
             elif nameChainTemps:  # if you prefer the old naming scheme
                 self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
