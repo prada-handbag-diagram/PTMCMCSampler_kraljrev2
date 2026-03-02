@@ -293,6 +293,7 @@ class PTSampler(object):
                 raise ValueError("beta_schedule values must lie in [0, 1]")
 
             self.beta_schedule = full
+            self.beta = float(full[0])
 
             # Override Niter/maxIter based on schedule
             Niter = int(full.size)
