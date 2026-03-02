@@ -997,76 +997,61 @@ class PTSampler(object):
 
             return p0, lnlike0, lnprob0
 
-    def PTswap(self, p0, lnlike0, lnprob0, iter):
-        """
-        Do parallel tempering swap. This feature is not compatible with 
-        Model-Switch
+def PTswap(self, p0, lnlike0, lnprob0, iter):
+    """
+    Parallel tempering swap using betas.
+    Assumes self.ladder is an array of betas (ladder[0] ~ 1, decreasing).
+    """
 
-        (Repurposed from Neil Cornish/Bence Becsy's code)
+    betas = np.asarray(self.ladder, dtype=float)  # betas per chain index
 
-        Swap acceptance rates are computed per chain by storing
-        the number of swaps proposed and accepted. Since swaps
-        are proposed for every chain, swapProposed is always
-        incremented and nswap_accepted will be incremented only
-        for chains that have the swap accepted. The swap acceptance
-        is calculated elsewhere.
+    # Gather current states/likelihoods to rank 0
+    log_Ls = self.comm.gather(lnlike0, root=0)
+    p0s = self.comm.gather(p0, root=0)
 
-        @param p0: current parameter vector
-        @param lnlike0: current log-likelihood
-        @param lnprob0: current log posterior value
-        @param iter: current iteration number
+    # Prepare per-swap acceptance bookkeeping
+    swap_accepted = np.zeros(self.nchain, dtype=float)
 
-        @return swapReturn: 0 = no swap proposed,
-        1 = swap proposed and rejected,
-        2 = swap proposed and accepted
+    new_p0s = None
+    new_log_Ls = None
 
-        @return p0: new parameter vector
-        @return lnlike0: new log-likelihood
-        @return lnprob0: new log posterior value
+    if self.MPIrank == 0:
+        # Buffers to scatter back out
+        new_p0s = [None] * self.nchain
+        new_log_Ls = [None] * self.nchain
 
-        """
-        Ts = self.ladder  # as beta
+        # swap_map maps "chain index" -> "which gathered state it currently holds"
+        swap_map = list(range(self.nchain))
 
-        log_Ls = self.comm.gather(lnlike0, root=0)  # list of likelihoods from each chain
-        p0s = self.comm.gather(p0, root=0)  # list of parameter arrays from each chain
+        # Propose swaps between adjacent chains, from hot end toward cold end
+        for i in reversed(range(self.nchain - 1)):
+            a = swap_map[i]       # index of state currently at chain i
+            b = swap_map[i + 1]   # index of state currently at chain i+1
 
-        if self.MPIrank == 0:
-            # set up map to help keep track of swaps
-            swap_map = list(range(self.nchain))
+            # log alpha = (beta_i - beta_{i+1}) * (L_b - L_a)
+            log_alpha = (betas[i] - betas[i + 1]) * (log_Ls[b] - log_Ls[a])
 
-            # loop through and propose a swap at each chain (starting from hottest chain and going down in T)
-            # and keep track of results in swap_map
-            for swap_chain in reversed(range(self.nchain - 1)):
+            if np.log(self.stream.random()) < log_alpha:
+                swap_map[i], swap_map[i + 1] = swap_map[i + 1], swap_map[i]
+                swap_accepted[i] += 1.0
 
-                log_acc_ratio = -log_Ls[swap_map[swap_chain]] * Ts[swap_chain]
-                log_acc_ratio += -log_Ls[swap_map[swap_chain + 1]] * Ts[swap_chain + 1]
-                log_acc_ratio += log_Ls[swap_map[swap_chain + 1]] * Ts[swap_chain]
-                log_acc_ratio += log_Ls[swap_map[swap_chain]] * Ts[swap_chain + 1]
+        # Build the swapped arrays for scatter
+        for j in range(self.nchain):
+            new_p0s[j] = p0s[swap_map[j]]
+            new_log_Ls[j] = log_Ls[swap_map[j]]
 
-                acc_ratio = np.exp(log_acc_ratio)
-                
-                if self.stream.uniform() <= acc_ratio:
-                    swap_map[swap_chain], swap_map[swap_chain + 1] = (
-                        swap_map[swap_chain + 1],
-                        swap_map[swap_chain],
-                    )
-                    swap_accepted[swap_chain] += 1
+    # Scatter swapped states/likelihoods back out
+    p0 = self.comm.scatter(new_p0s, root=0)
+    lnlike0 = self.comm.scatter(new_log_Ls, root=0)
 
-            # loop through the chains and record the new samples and log_Ls
-            for j in range(self.nchain):
-                new_p0s[j] = p0s[swap_map[j]]
-                new_log_Ls[j] = log_Ls[swap_map[j]]
+    # Track acceptance stats
+    self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
+    self.swapProposed += 1
 
-        # broadcast the new samples and log_Ls to all chains
-        p0 = self.comm.scatter(p0s, root=0)
-        lnlike0 = self.comm.scatter(log_Ls, root=0)
-        self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
-        self.swapProposed += 1
+    # Recompute posterior for this chain under its beta
+    lnprob0 = self.beta * lnlike0 + self.logp(p0)
 
-        # calculate new posterior values
-        lnprob0 = self.beta * lnlike0 + self.logp(p0)
-
-        return p0, lnlike0, lnprob0
+    return p0, lnlike0, lnprob0
 
     def Ladder(self, Bmax, Bmin=None, tstep=None, shape="geometric"):
         """
