@@ -259,6 +259,7 @@ class PTSampler(object):
         # Varying-beta scheduling
         self.beta_schedule = None
         self.disable_pt = False
+        scheduling_active = beta_schedule is not None
 
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0")
@@ -900,39 +901,39 @@ class PTSampler(object):
         y, qxy, jump_name = self._jump(p0, iter)  # made a jump
         self.jumpDict[jump_name][0] += 1
 
-            # compute prior and likelihood
-            if not self.modelswitch:
-                lp = self.logp(y)
+        # compute prior and likelihood
+        if not self.modelswitch:
+            lp = self.logp(y)
 
-                if lp == -np.inf:
-                    newlnprob = -np.inf
+            if lp == -np.inf:
+                newlnprob = -np.inf
 
-                else:
-                    newlnlike = self.logl(y)
-                    newlnprob = self.beta * newlnlike + lp
+            else:
+                newlnlike = self.logl(y)
+                newlnprob = self.beta * newlnlike + lp
 
-            elif self.modelswitch:  # Using modelswitch
+        elif self.modelswitch:  # Using modelswitch
 
-                lp1 = self.logp1(y)
-                lp2 = self.logp2(y)
+            lp1 = self.logp1(y)
+            lp2 = self.logp2(y)
 
-                if lp1 == -np.inf or lp2 == -np.inf:
-                    newlnprob = -np.inf
+            if lp1 == -np.inf or lp2 == -np.inf:
+                newlnprob = -np.inf
 
-                else:
-                    newlnlike1 = self.logl1(y)
-                    newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
+            else:
+                newlnlike1 = self.logl1(y)
+                newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
 
-                    newlnlike2 = self.logl2(y)
-                    newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
+                newlnlike2 = self.logl2(y)
+                newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
 
-                    newlnlike = newlnprob1 - newlnprob2
+                newlnlike = newlnprob1 - newlnprob2
 
-                    # ln posterior = beta * ln likelihood + ln prior
-                    # ln prior is set to ln posterior of the second model
-                    # ln likelihood is the difference between ln posterior of the first and second models
-                    # beta determines how much of newlnprob1 vs newlnprob2
-                    newlnprob = self.beta * (newlnlike) + newlnprob2
+                # ln posterior = beta * ln likelihood + ln prior
+                # ln prior is set to ln posterior of the second model
+                # ln likelihood is the difference between ln posterior of the first and second models
+                # beta determines how much of newlnprob1 vs newlnprob2
+                newlnprob = self.beta * (newlnlike) + newlnprob2
 
             # hastings step
             diff = newlnprob - lnprob0 + qxy
