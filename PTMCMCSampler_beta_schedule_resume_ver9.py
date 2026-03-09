@@ -763,6 +763,7 @@ class PTSampler(object):
             )
 
         self.comm.barrier()
+        self.tstart = time.time()
 
         # start iterations
         iter = i0
