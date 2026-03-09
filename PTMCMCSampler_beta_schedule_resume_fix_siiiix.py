@@ -907,6 +907,7 @@ class PTSampler(object):
             lp = self.logp(y)
 
             if lp == -np.inf:
+                newlnlike = -np.inf
                 newlnprob = -np.inf
 
             else:
