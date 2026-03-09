@@ -263,19 +263,17 @@ class PTSampler(object):
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0")
 
-        scheduling_active = beta_schedule is not None
-        if scheduling_active:
-            if hotChain:
-                raise ValueError("hotChain is not compatible with beta_schedule runs")
-            if self.resume:
-                raise ValueError("resume=True is not supported when beta_schedule is used")
-            if ladder is not None:
-                raise ValueError(f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs.")
-            if self.nchain > 1:
-                raise ValueError(
-                    f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
-                    "Run without MPI or use a single MPI process."
-                )
+        if hotChain:
+            raise ValueError("hotChain is not compatible with beta_schedule runs")
+        if ladder is not None:
+            raise ValueError(
+                f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs."
+            )
+        if self.nchain > 1:
+            raise ValueError(
+                f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
+                "Run without MPI or use a single MPI process."
+            )
 
             self.disable_pt = True
 
@@ -456,7 +454,12 @@ class PTSampler(object):
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
                 expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
-                    raise Exception(f"Old chain format: expected {expected_cols} columns (beta+params+meta), got {self.resumechain.shape[1]}")
+                    current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
+                    raise Exception(
+                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
+                        f"but found {self.resumechain.shape[1]}. "
+                        "This usually means the chain file was created with a different resume/output format."
+                    )
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
             except ValueError as error:
                 print("Reading old chain files failed with error", error)
@@ -654,31 +657,32 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps
             )
 
-        # compute lnprob for initial point in chain
-
-        # if resuming, just start with first point in chain  ### originally set to 0, now -1
+        # compute lnprob for initial point in chain... if resuming, start from the LAST saved point in the chain
         if self.resume and self.resumeLength > 0:
 
+            last_row = self.resumeLength - 1
             param_start = 1 if self.write_beta_col else 0
 
             if self.write_beta_col:
-                self.beta = self.resumechain[0, 0]
+                self.beta = self.resumechain[last_row, 0]
             else:
                 # legacy format — beta comes from ladder
                 self.beta = self.ladder[self.MPIrank]
 
-            p0 = self.resumechain[0, param_start : param_start + self.ndim]
-            
-            lnlike0 = self.resumechain[0, -(self.n_metaparams - 1)]
-            lnprob0 = self.resumechain[0, -self.n_metaparams]
+            p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
+
+            lnprob0 = self.resumechain[last_row, -self.n_metaparams]
+            lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
 
             if self.modelswitch:
-                lnlike1 = self.resumechain[0, -(self.n_metaparams - 3)]
-                lnprob1 = self.resumechain[0, -(self.n_metaparams - 2)]
-                lnlike2 = self.resumechain[0, -(self.n_metaparams - 5)]
-                lnprob2 = self.resumechain[0, -(self.n_metaparams - 4)]
+                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 6)]
+                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 5)]
+                lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 4)]
+                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 3)]
 
             self.ind_next_write = self.resumeLength
+            self.naccepted = int(round(((self.resumeLength - 1) * self.thin) * self.resumechain[last_row, -2]))
+            i0 = (self.resumeLength - 1) * self.thin
 
         else:
             # compute prior and likelihood
@@ -716,9 +720,15 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
-        # If beta_schedule is active, make the initial (iter=0) sample consistent with the schedule
+        # If beta_schedule is active, make the current state consistent with the schedule
         if getattr(self, "beta_schedule", None) is not None:
-            self.beta = float(self.beta_schedule[0])
+            current_idx = i0
+            if current_idx < 0 or current_idx >= len(self.beta_schedule):
+                raise IndexError(
+                    f"beta_schedule index out of range at initialization: idx={current_idx}, len={len(self.beta_schedule)}"
+                )
+
+            self.beta = float(self.beta_schedule[current_idx])
 
             if not self.modelswitch:
                 lp0 = self.logp(p0)
@@ -867,7 +877,7 @@ class PTSampler(object):
         
         # Recompute lnprob0 under current beta
         if getattr(self, "beta_schedule", None) is not None:
-            idx = iter - 1
+            idx = iter
             if idx < 0 or idx >= len(self.beta_schedule):
                 raise IndexError(
                     f"beta_schedule index out of range: idx={idx}, len={len(self.beta_schedule)}"
@@ -886,39 +896,9 @@ class PTSampler(object):
                 else:
                     lnprob0 = self.beta * lnlike0 + lnprob2
         
-        # jump proposal ###
-
-        # if resuming, just use previous chain points.  Use each one thin times to compensate for
-        # thinning when they were written out
-        if self.resume and self.resumeLength > 0 and iter < self.resumeLength * self.thin:
-            row = iter // self.thin
-
-            param_start = 1 if self.write_beta_col else 0
-
-            if self.write_beta_col:
-                self.beta = self.resumechain[row, 0]
-            else:
-                self.beta = self.ladder[self.MPIrank]
-
-            p0 = self.resumechain[row, param_start : param_start + self.ndim]
-            
-            lnlike0 = self.resumechain[row, -(self.n_metaparams - 1)]
-            lnprob0 = self.resumechain[row, -self.n_metaparams]
-
-            if self.modelswitch:
-                lnlike1 = self.resumechain[row, -(self.n_metaparams - 3)]
-                lnprob1 = self.resumechain[row, -(self.n_metaparams - 2)]
-                lnlike2 = self.resumechain[row, -(self.n_metaparams - 5)]
-                lnprob2 = self.resumechain[row, -(self.n_metaparams - 4)]
-
-            if getattr(self, "beta_schedule", None) is not None and self.MPIrank == 0 and iter % (10 * self.thin) == 0:
-                print(f"[debug] iter={iter} beta={self.beta:.6f}")
-            
-            # update acceptance counter
-            self.naccepted = iter * self.resumechain[row, -2]
-        else:
-            y, qxy, jump_name = self._jump(p0, iter)  # made a jump
-            self.jumpDict[jump_name][0] += 1
+        # jump proposal, once sample() has restored the last saved state, resume proceeds normally
+        y, qxy, jump_name = self._jump(p0, iter)  # made a jump
+        self.jumpDict[jump_name][0] += 1
 
             # compute prior and likelihood
             if not self.modelswitch:
@@ -1131,6 +1111,12 @@ class PTSampler(object):
                 "\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)])
             )
 
+            # main posterior / likelihood for the active chain state
+            self._chainfile.write(
+                "\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind])
+            )
+
+            # extra model-switch diagnostics, if present
             if self.modelswitch:
                 self._chainfile.write(
                     "\t%f\t%f\t%f\t%f"
@@ -1142,8 +1128,10 @@ class PTSampler(object):
                     )
                 )
 
-            self._chainfile.write("\t%f\t%f\n" % (self.naccepted / iter if iter > 0 else 0, pt_acc))
-
+            # acceptance metadata goes last
+            self._chainfile.write(
+                "\t%f\t%f\n" % (self.naccepted / iter if iter > 0 else 0, pt_acc)
+            )
         self._chainfile.close()
         self.ind_next_write = write_end  # Ready for next write
 
