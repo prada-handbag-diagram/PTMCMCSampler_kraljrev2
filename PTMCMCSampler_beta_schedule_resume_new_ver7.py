@@ -920,7 +920,12 @@ class PTSampler(object):
             lp2 = self.logp2(y)
 
             if lp1 == -np.inf or lp2 == -np.inf:
+                newlnlike = -np.inf
                 newlnprob = -np.inf
+                newlnlike1 = -np.inf
+                newlnprob1 = -np.inf
+                newlnlike2 = -np.inf
+                newlnprob2 = -np.inf
 
             else:
                 newlnlike1 = self.logl1(y)
