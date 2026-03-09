@@ -295,8 +295,10 @@ class PTSampler(object):
             self.beta_schedule = full
             self.beta = float(full[0])
     
-            # Override Niter/maxIter based on schedule
-            Niter = int(full.size)
+            # Override Niter/maxIter based on schedule, full.size is the number of beta values for stored states, including the initial state, so the number of transition steps is one less. 
+            Niter = int(full.size) - 1
+            if Niter < 0:
+                raise ValueError("beta_schedule must contain at least one value")
             if maxIter is None:
                 maxIter = Niter
 
