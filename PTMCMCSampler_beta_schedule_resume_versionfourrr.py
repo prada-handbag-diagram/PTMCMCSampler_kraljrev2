@@ -327,7 +327,12 @@ class PTSampler(object):
         self.tstart = 0
             
         # Output/resume format flags (preserve legacy format unless feature is active)
-        self.write_beta_col = (self.beta_schedule is not None)
+        current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
+        raise Exception(
+            f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
+            f"but found {self.resumechain.shape[1]}. "
+            "This usually means the chain file was created with the opposite beta_schedule mode."
+        )
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
@@ -677,10 +682,10 @@ class PTSampler(object):
             lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
 
             if self.modelswitch:
-                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 6)]
-                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 5)]
+                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 2)]
+                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 3)]
                 lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 4)]
-                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 3)]
+                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
 
             self.ind_next_write = self.resumeLength
             self.naccepted = int(round(((self.resumeLength - 1) * self.thin) * self.resumechain[last_row, -2]))
