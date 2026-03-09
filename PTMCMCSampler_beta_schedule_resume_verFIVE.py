@@ -326,13 +326,8 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Output/resume format flags (preserve legacy format unless feature is active)
-        current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
-        raise Exception(
-            f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
-            f"but found {self.resumechain.shape[1]}. "
-            "This usually means the chain file was created with the opposite beta_schedule mode."
-        )
+        # Output/resume format flag (preserve legacy format unless feature is active)
+        self.write_beta_col = (self.beta_schedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
