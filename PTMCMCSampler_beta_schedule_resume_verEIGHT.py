@@ -692,6 +692,7 @@ class PTSampler(object):
                 lp = self.logp(p0)
 
                 if lp == -np.inf:
+                    lnlike0 = -np.inf
                     lnprob0 = -np.inf
 
                 else:
