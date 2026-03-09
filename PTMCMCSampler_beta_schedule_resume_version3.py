@@ -300,31 +300,31 @@ class PTSampler(object):
             if maxIter is None:
                 maxIter = Niter
 
-            # Default maxIter for non-scheduled runs
-            if maxIter is None:
-                maxIter = Niter
-    
-            if isave % thin != 0:
-                raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
-    
-            if Niter % thin != 0:
-                print(
-                    "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
-                    % (Niter, thin, Niter % thin)
-                )
-    
-            self.ladder = ladder
-            self.covUpdate = covUpdate
-            self.SCAMweight = SCAMweight
-            self.AMweight = AMweight
-            self.DEweight = DEweight
-            self.burn = burn
-            self.Tskip = Tskip
-            self.thin = thin
-            self.isave = isave
-            self.Niter = Niter
-            self.neff = neff
-            self.tstart = 0
+        # Default maxIter for non-scheduled runs
+        if maxIter is None:
+            maxIter = Niter
+
+        if isave % thin != 0:
+            raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
+
+        if Niter % thin != 0:
+            print(
+                "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
+                % (Niter, thin, Niter % thin)
+            )
+
+        self.ladder = ladder
+        self.covUpdate = covUpdate
+        self.SCAMweight = SCAMweight
+        self.AMweight = AMweight
+        self.DEweight = DEweight
+        self.burn = burn
+        self.Tskip = Tskip
+        self.thin = thin
+        self.isave = isave
+        self.Niter = Niter
+        self.neff = neff
+        self.tstart = 0
             
             # Output/resume format flags (preserve legacy format unless feature is active)
             self.write_beta_col = (self.beta_schedule is not None)
