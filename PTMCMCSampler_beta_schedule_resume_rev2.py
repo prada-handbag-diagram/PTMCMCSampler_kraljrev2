@@ -264,227 +264,228 @@ class PTSampler(object):
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0")
 
-        if hotChain:
-            raise ValueError("hotChain is not compatible with beta_schedule runs")
-        if ladder is not None:
-            raise ValueError(
-                f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs."
-            )
-        if self.nchain > 1:
-            raise ValueError(
-                f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
-                "Run without MPI or use a single MPI process."
-            )
-
+        if scheduling_active:
+            if hotChain:
+                raise ValueError("hotChain is not compatible with beta_schedule runs")
+            if ladder is not None:
+                raise ValueError(
+                    f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs."
+                )
+            if self.nchain > 1:
+                raise ValueError(
+                    f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
+                    "Run without MPI or use a single MPI process."
+                )
+    
             self.disable_pt = True
-
+    
             # Parse beta_schedule as array-like custom schedule
             beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
-            
+                
             hold = np.zeros(int(hold_iter), dtype=float)
             full = np.concatenate([hold, beta_core])
-
+    
             if full.ndim != 1 or full.size == 0:
                 raise ValueError("beta_schedule produced an empty schedule")
             if not np.all(np.isfinite(full)):
                 raise ValueError("beta_schedule contains non-finite values")
             if np.min(full) < 0.0 or np.max(full) > 1.0:
                 raise ValueError("beta_schedule values must lie in [0, 1]")
-
+    
             self.beta_schedule = full
             self.beta = float(full[0])
-
+    
             # Override Niter/maxIter based on schedule
             Niter = int(full.size)
             if maxIter is None:
                 maxIter = Niter
 
-        # Default maxIter for non-scheduled runs
-        if maxIter is None:
-            maxIter = Niter
-
-        if isave % thin != 0:
-            raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
-
-        if Niter % thin != 0:
-            print(
-                "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
-                % (Niter, thin, Niter % thin)
-            )
-
-        self.ladder = ladder
-        self.covUpdate = covUpdate
-        self.SCAMweight = SCAMweight
-        self.AMweight = AMweight
-        self.DEweight = DEweight
-        self.burn = burn
-        self.Tskip = Tskip
-        self.thin = thin
-        self.isave = isave
-        self.Niter = Niter
-        self.neff = neff
-        self.tstart = 0
-        
-        # Output/resume format flags (preserve legacy format unless feature is active)
-        self.write_beta_col = (self.beta_schedule is not None)
-
-        N = int(maxIter / thin) + 1  # first sample + those we generate
-
-        self._lnprob = np.zeros(N)
-        self._lnlike = np.zeros(N)
-        self._chain = np.zeros((N, self.ndim))
-        self._beta = np.zeros(N)
-        self.ind_next_write = 0  # Next index in these arrays to write out
-        self.naccepted = 0
-        self.swapProposed = 0
-        self.nswap_accepted = 0
-
-        self.n_metaparams = 8 if self.modelswitch else 4
-
-        if self.modelswitch:
-            self._lnprob1 = np.zeros(N)
-            self._lnlike1 = np.zeros(N)
-            self._lnprob2 = np.zeros(N)
-            self._lnlike2 = np.zeros(N)
-
-        # set up covariance matrix and DE buffers
-        if self.MPIrank == 0:
-            self._AMbuffer = np.zeros((self.covUpdate, self.ndim))
-            self._DEbuffer = np.zeros((self.burn, self.ndim))
-
-        # ##### setup default jump proposal distributions ##### #
-
-        # Gradient-based jumps
-        if self.logl_grad is not None and self.logp_grad is not None:
-            # DOES MALA do anything with the burnin? (Not adaptive enabled yet)
-            malajump = MALAJump(self.logl_grad, self.logp_grad, self.cov, self.burn)
-            self.addProposalToCycle(malajump, MALAweight)
-            if MALAweight > 0:
-                print("WARNING: MALA jumps are not working properly yet")
-
-            # Perhaps have an option to adaptively tune the mass matrix?
-            # Now that is done by defaulk
-            hmcjump = HMCJump(
-                self.logl_grad,
-                self.logp_grad,
-                self.cov,
-                self.burn,
-                stepsize=HMCstepsize,
-                nminsteps=2,
-                nmaxsteps=HMCsteps,
-            )
-            self.addProposalToCycle(hmcjump, HMCweight)
-
-            # Target acceptance rate (delta) should be optimal for 0.6
-            nutsjump = NUTSJump(
-                self.logl_grad,
-                self.logp_grad,
-                self.cov,
-                self.burn,
-                trajectoryDir=None,
-                write_burnin=False,
-                force_trajlen=None,
-                force_epsilon=None,
-                delta=0.6,
-            )
-            self.addProposalToCycle(nutsjump, NUTSweight)
-
-        # add SCAM
-        self.addProposalToCycle(self.covarianceJumpProposalSCAM, self.SCAMweight)
-
-        # add AM
-        self.addProposalToCycle(self.covarianceJumpProposalAM, self.AMweight)
-
-        # check length of jump cycle
-        if len(self.propCycle) == 0:
-            raise ValueError("No jump proposals specified!")
-
-        # randomize cycle
-        self.randomizeProposalCycle()
-
-        # Ladder setup
-        if scheduling_active:
-            # varying-beta run: no PT ladder
-            self.ladder = np.array([1.0])
-        else:
-            # if ladder given check if in temp or beta
-            if self.ladder is not None and len(self.ladder) > 0:
-                if max(self.ladder) > 1:
-                    # user gave temperatures >>> convert to beta
-                    self.ladder = [1 / temp for temp in self.ladder]
-
-            # ladder not specified, create one
-            else:
-                # If temperatures are used, convert to beta
-                if Tmin:  # used temperatures
-                    Bmax = 1 / Tmin  # Tmin is typically 1
-                if Tmax:
-                    Bmin = 1 / Tmax
-
-                self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
-
-            # beta for current chain (only meaningful for PT runs)
-            self.beta = self.ladder[self.MPIrank]
-
-        # Name chain files
-        if scheduling_active:
-            # beta changes over time, fixed filename for scheduled runs
-            self.fname = self.outDir + "/chain_schedule.txt"
-        else:
-            if hotChain and self.MPIrank == self.nchain - 1:
-                self.beta = 0  # This is the "hot chain"
-                if nameChainTemps:  # if you prefer the old naming scheme
-                    self.fname = self.outDir + "/chain_hot.txt"
-                else:  # new naming scheme with beta
-                    self.fname = self.outDir + "/chain_0.txt"
-
-            elif nameChainTemps:  # if you prefer the old naming scheme
-                self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
-
-            else:  # new naming scheme with beta
-                self.fname = self.outDir + "/chain_{0}.txt".format(self.beta)
-
-        # write hot chains
-        self.writeHotChains = writeHotChains
-
-        self.resumeLength = 0
-        if self.resume and os.path.isfile(self.fname):
-            if self.verbose:
-                print("Resuming run from chain file {0}".format(self.fname))
-            try:
-                self.resumechain = np.loadtxt(self.fname, ndmin=2)
-                expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
-                if self.resumechain.shape[1] != expected_cols:
-                    current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
-                    raise Exception(
-                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
-                        f"but found {self.resumechain.shape[1]}. "
-                        "This usually means the chain file was created with a different resume/output format."
-                    )
-                self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
-            except ValueError as error:
-                print("Reading old chain files failed with error", error)
-                raise Exception("Couldn't read old chain to resume")
-            self._chainfile = open(self.fname, "a")
-            if (
-                self.isave != self.thin  # This special case is always OK
-                and self.resumeLength % (self.isave / self.thin) != 1  # Initial sample plus blocks of isave/thin
-            ):
-                raise Exception(
-                    (
-                        "Old chain has {0} rows, which is not the initial sample plus a multiple of isave/thin = {1}"
-                    ).format(self.resumeLength, self.isave // self.thin)
+            # Default maxIter for non-scheduled runs
+            if maxIter is None:
+                maxIter = Niter
+    
+            if isave % thin != 0:
+                raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
+    
+            if Niter % thin != 0:
+                print(
+                    "Niter = %d is not a multiple of thin = %d.  The last %d samples will be lost"
+                    % (Niter, thin, Niter % thin)
                 )
-            print(
-                "Resuming with",
-                self.resumeLength,
-                "samples from file representing",
-                (self.resumeLength - 1) * self.thin + 1,
-                "original samples",
-            )
-        else:
-            self._chainfile = open(self.fname, "w")
-        self._chainfile.close()
+    
+            self.ladder = ladder
+            self.covUpdate = covUpdate
+            self.SCAMweight = SCAMweight
+            self.AMweight = AMweight
+            self.DEweight = DEweight
+            self.burn = burn
+            self.Tskip = Tskip
+            self.thin = thin
+            self.isave = isave
+            self.Niter = Niter
+            self.neff = neff
+            self.tstart = 0
+            
+            # Output/resume format flags (preserve legacy format unless feature is active)
+            self.write_beta_col = (self.beta_schedule is not None)
+    
+            N = int(maxIter / thin) + 1  # first sample + those we generate
+    
+            self._lnprob = np.zeros(N)
+            self._lnlike = np.zeros(N)
+            self._chain = np.zeros((N, self.ndim))
+            self._beta = np.zeros(N)
+            self.ind_next_write = 0  # Next index in these arrays to write out
+            self.naccepted = 0
+            self.swapProposed = 0
+            self.nswap_accepted = 0
+    
+            self.n_metaparams = 8 if self.modelswitch else 4
+    
+            if self.modelswitch:
+                self._lnprob1 = np.zeros(N)
+                self._lnlike1 = np.zeros(N)
+                self._lnprob2 = np.zeros(N)
+                self._lnlike2 = np.zeros(N)
+    
+            # set up covariance matrix and DE buffers
+            if self.MPIrank == 0:
+                self._AMbuffer = np.zeros((self.covUpdate, self.ndim))
+                self._DEbuffer = np.zeros((self.burn, self.ndim))
+    
+            # ##### setup default jump proposal distributions ##### #
+    
+            # Gradient-based jumps
+            if self.logl_grad is not None and self.logp_grad is not None:
+                # DOES MALA do anything with the burnin? (Not adaptive enabled yet)
+                malajump = MALAJump(self.logl_grad, self.logp_grad, self.cov, self.burn)
+                self.addProposalToCycle(malajump, MALAweight)
+                if MALAweight > 0:
+                    print("WARNING: MALA jumps are not working properly yet")
+    
+                # Perhaps have an option to adaptively tune the mass matrix?
+                # Now that is done by defaulk
+                hmcjump = HMCJump(
+                    self.logl_grad,
+                    self.logp_grad,
+                    self.cov,
+                    self.burn,
+                    stepsize=HMCstepsize,
+                    nminsteps=2,
+                    nmaxsteps=HMCsteps,
+                )
+                self.addProposalToCycle(hmcjump, HMCweight)
+    
+                # Target acceptance rate (delta) should be optimal for 0.6
+                nutsjump = NUTSJump(
+                    self.logl_grad,
+                    self.logp_grad,
+                    self.cov,
+                    self.burn,
+                    trajectoryDir=None,
+                    write_burnin=False,
+                    force_trajlen=None,
+                    force_epsilon=None,
+                    delta=0.6,
+                )
+                self.addProposalToCycle(nutsjump, NUTSweight)
+    
+            # add SCAM
+            self.addProposalToCycle(self.covarianceJumpProposalSCAM, self.SCAMweight)
+    
+            # add AM
+            self.addProposalToCycle(self.covarianceJumpProposalAM, self.AMweight)
+    
+            # check length of jump cycle
+            if len(self.propCycle) == 0:
+                raise ValueError("No jump proposals specified!")
+    
+            # randomize cycle
+            self.randomizeProposalCycle()
+    
+            # Ladder setup
+            if scheduling_active:
+                # varying-beta run: no PT ladder
+                self.ladder = np.array([1.0])
+            else:
+                # if ladder given check if in temp or beta
+                if self.ladder is not None and len(self.ladder) > 0:
+                    if max(self.ladder) > 1:
+                        # user gave temperatures >>> convert to beta
+                        self.ladder = [1 / temp for temp in self.ladder]
+    
+                # ladder not specified, create one
+                else:
+                    # If temperatures are used, convert to beta
+                    if Tmin:  # used temperatures
+                        Bmax = 1 / Tmin  # Tmin is typically 1
+                    if Tmax:
+                        Bmin = 1 / Tmax
+    
+                    self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+    
+                # beta for current chain (only meaningful for PT runs)
+                self.beta = self.ladder[self.MPIrank]
+    
+            # Name chain files
+            if scheduling_active:
+                # beta changes over time, fixed filename for scheduled runs
+                self.fname = self.outDir + "/chain_schedule.txt"
+            else:
+                if hotChain and self.MPIrank == self.nchain - 1:
+                    self.beta = 0  # This is the "hot chain"
+                    if nameChainTemps:  # if you prefer the old naming scheme
+                        self.fname = self.outDir + "/chain_hot.txt"
+                    else:  # new naming scheme with beta
+                        self.fname = self.outDir + "/chain_0.txt"
+    
+                elif nameChainTemps:  # if you prefer the old naming scheme
+                    self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
+    
+                else:  # new naming scheme with beta
+                    self.fname = self.outDir + "/chain_{0}.txt".format(self.beta)
+    
+            # write hot chains
+            self.writeHotChains = writeHotChains
+    
+            self.resumeLength = 0
+            if self.resume and os.path.isfile(self.fname):
+                if self.verbose:
+                    print("Resuming run from chain file {0}".format(self.fname))
+                try:
+                    self.resumechain = np.loadtxt(self.fname, ndmin=2)
+                    expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
+                    if self.resumechain.shape[1] != expected_cols:
+                        current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
+                        raise Exception(
+                            f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
+                            f"but found {self.resumechain.shape[1]}. "
+                            "This usually means the chain file was created with a different resume/output format."
+                        )
+                    self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
+                except ValueError as error:
+                    print("Reading old chain files failed with error", error)
+                    raise Exception("Couldn't read old chain to resume")
+                self._chainfile = open(self.fname, "a")
+                if (
+                    self.isave != self.thin  # This special case is always OK
+                    and self.resumeLength % (self.isave / self.thin) != 1  # Initial sample plus blocks of isave/thin
+                ):
+                    raise Exception(
+                        (
+                            "Old chain has {0} rows, which is not the initial sample plus a multiple of isave/thin = {1}"
+                        ).format(self.resumeLength, self.isave // self.thin)
+                    )
+                print(
+                    "Resuming with",
+                    self.resumeLength,
+                    "samples from file representing",
+                    (self.resumeLength - 1) * self.thin + 1,
+                    "original samples",
+                )
+            else:
+                self._chainfile = open(self.fname, "w")
+            self._chainfile.close()
 
     def updateChains(
         self,
@@ -935,25 +936,25 @@ class PTSampler(object):
                 # beta determines how much of newlnprob1 vs newlnprob2
                 newlnprob = self.beta * (newlnlike) + newlnprob2
 
-            # hastings step
-            diff = newlnprob - lnprob0 + qxy
+        # hastings step
+        diff = newlnprob - lnprob0 + qxy
 
-            rand_log = np.log(self.stream.random())
-            if diff > rand_log:
+        rand_log = np.log(self.stream.random())
+        if diff > rand_log:
                 
-                # accept jump
-                p0, lnlike0, lnprob0 = y, newlnlike, newlnprob
-                if self.modelswitch:
-                    lnlike1, lnlike2, lnprob1, lnprob2 = (
-                        newlnlike1,
-                        newlnlike2,
-                        newlnprob1,
-                        newlnprob2,
-                    )
+            # accept jump
+            p0, lnlike0, lnprob0 = y, newlnlike, newlnprob
+            if self.modelswitch:
+                lnlike1, lnlike2, lnprob1, lnprob2 = (
+                    newlnlike1,
+                    newlnlike2,
+                    newlnprob1,
+                    newlnprob2,
+                )
 
-                # update acceptance counter
-                self.naccepted += 1
-                self.jumpDict[jump_name][1] += 1
+            # update acceptance counter
+            self.naccepted += 1
+            self.jumpDict[jump_name][1] += 1
 
         # Update chains
         if self.modelswitch:
