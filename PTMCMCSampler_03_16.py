@@ -223,37 +223,88 @@ class PTSampler(object):
     ):
         """
         Initialize MCMC quantities
-        @param p0: Initial parameter vector
-        @param self.Niter: Number of iterations to use for T = 1 chain
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted.
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is not already given
-        (default='geometric')
-        @param Tmin: Minimum temperature in ladder (default=None)
-        @param Tmax: Maximum temperature in ladder (default=None)
-        @param Tskip: Number of steps between proposed temperature swaps (default=100)
-        @param isave: Write to file every isave samples (default=1000)
-        @param covUpdate: Number of iterations between AM covariance updates (default=1000)
-        @param SCAMweight: Weight of SCAM jumps in overall jump cycle (default=20)
-        @param AMweight: Weight of AM jumps in overall jump cycle (default=20)
-        @param DEweight: Weight of DE jumps in overall jump cycle (default=20)
-        @param NUTSweight: Weight of the NUTS jumps in jump cycle (default=20)
-        @param MALAweight: Weight of the MALA jumps in jump cycle (default=20)
-        @param HMCweight: Weight of the HMC jumps in jump cycle (default=20)
-        @param HMCstepsize: Step-size of the HMC jumps (default=0.1)
-        @param HMCsteps: Maximum number of steps in an HMC trajectory (default=300)
-        @param burn: Burn in time (DE jumps added after this iteration) (default=10000)
-        @param maxIter: Maximum number of iterations for high temperature chains
-                        (default=2*self.Niter)
-        @param self.thin: MCMC Samples are recorded every self.thin samples
-        @param i0: Iteration to start MCMC (if i0 !=0, do not re-initialize)
-        @param neff: Number of effective samples to collect before terminating
-        @param writeHotChains: Writes out the hot chain (default=False)
-        @param hotChain: Beta=0 (previously Temp=1e80) (default=False)
-        @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
+        
+        Niter: int
+            Number of iterations for the cold chain (beta = 1) when using standard PTMCMC
 
+        ladder: array-like, optional
+            User-defined temperature or beta ladder. Either temperatures or inverse temperatures (betas) may be supplied
 
+        shape: {"geometric", "linear"}, optional
+            Shape of the automatically generated temperature/beta ladder when `ladder` is not supplied. Ignored if `ladder` or `beta_schedule` is provided
+
+        Bmax: float
+            Maximum beta value (default = 1)
+
+        Bmin: float, optional
+            Minimum beta value
+
+        Tmin, Tmax: float, optional
+            Alternative temperature specification for ladder construction
+
+        Tskip: int
+            Number of iterations between parallel-tempering swap attempts
+
+        isave: int
+            Number of iterations between writing samples to disk
+
+        covUpdate: int
+            Number of iterations between adaptive covariance updates
+
+        SCAMweight, AMweight, DEweight: int
+            Relative weights of SCAM, AM, and Differential Evolution jump proposals
+
+        NUTSweight, HMCweight, MALAweight: int
+            Relative weights of gradient-based jump proposals
+
+        burn: int
+            Burn-in iterations before enabling Differential Evolution jumps
+
+        HMCstepsize: float
+            Step size for HMC proposals
+
+        HMCsteps: int
+            Maximum trajectory length for HMC proposals
+
+        maxIter: int, optional
+            Maximum number of iterations for high-temperature chains
+
+        thin: int
+            Thinning interval for storing samples
+
+        i0: int
+            Initial iteration index when resuming runs
+
+        neff: int, optional
+            Target effective sample size for early termination
+
+        writeHotChains: bool
+            If True, write hot chains to disk
+
+        hotChain: bool
+            If True, include a beta=0 hot chain
+
+        beta_schedule: array-like, optional
+            Optional schedule of inverse temperatures (betas) to apply at each iteration. If provided, parallel tempering is disabled and the chain runs as a single chain whose beta changes over time
+
+            Values must lie in the interval [0, 1]
+
+            This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually turned on
+
+        hold_iter: int, optional
+            Number of initial iterations for which beta is fixed to 0 before following `beta_schedule`. This effectively prepends a plateau of beta = 0 values to the schedule
+
+        nameChainTemps: bool
+            If True, chain files are named using temperatures instead of betas
+
+        Notes
+        -----
+        When `beta_schedule` is provided:
+
+        * Parallel tempering is disabled
+        * Only single-chain runs are supported
+        * `ladder` and `hotChain` options are not allowed
+        * The number of iterations is determined by the schedule length
         """
 
         # Varying-beta scheduling
@@ -593,39 +644,114 @@ class PTSampler(object):
         nameChainTemps=False,
     ):
         """
-        Function to carry out PTMCMC sampling.
-
-        @param p0: Initial parameter vector
-        @param self.Niter: Number of iterations to use for T = 1 chain
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is not already
-                    given (default='geometric')
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted
-        @param Tmin: Minimum temperature in ladder (default=None)
-        @param Tmax: Maximum temperature in ladder (default=None)
-        @param Tskip: Number of steps between proposed temperature swaps (default=100)
-        @param isave: Write to file every isave samples (default=1000)
-        @param covUpdate: Number of iterations between AM covariance updates (default=1000)
-        @param SCAMweight: Weight of SCAM jumps in overall jump cycle (default=20)
-        @param AMweight: Weight of AM jumps in overall jump cycle (default=20)
-        @param DEweight: Weight of DE jumps in overall jump cycle (default=20)
-        @param NUTSweight: Weight of the NUTS jumps in jump cycle (default=20)
-        @param MALAweight: Weight of the MALA jumps in jump cycle (default=20)
-        @param HMCweight: Weight of the HMC jumps in jump cycle (default=20)
-        @param HMCstepsize: Step-size of the HMC jumps (default=0.1)
-        @param HMCsteps: Maximum number of steps in an HMC trajectory (default=300)
-        @param burn: Burn in time (DE jumps added after this iteration) (default=10000)
-        @param maxIter: Maximum number of iterations for high temperature chains
-                    (default=2*self.Niter)
-        @param self.thin: MCMC Samples are recorded every self.thin samples
-        @param i0: Iteration to start MCMC (if i0 !=0, do not re-initialize)
-        @param neff: Number of effective samples to collect before terminating
-        @param writeHotChains: Writes out the hot chain (default=False)
-        @param hotChain: Beta=0 (previously Temp=1e80) (default=False)
-        @param nameChainTemps: Reverts to temperature naming convention of chains (default=False)
-
-        """        
+        Run the PTMCMC sampler. This function performs Parallel Tempering Markov Chain Monte Carlo sampling. Depending on configuration, the sampler operates in one of two modes:
+        1. Standard Parallel Tempering (default)
+        2. Varying-beta / power-posterior sampling (when ``beta_schedule`` is provided)
+        
+        Parameters
+        ----------
+        p0: array_like
+            Initial parameter vector
+        
+        Niter: int
+            Number of iterations for the cold chain (beta = 1) in standard PTMCMC runs
+        
+        Bmax: float, optional
+            Maximum beta value (default = 1)
+        
+        Bmin: float, optional
+            Minimum beta value in the ladder
+        
+        ladder: array_like, optional
+            User-specified beta or temperature ladder. If temperatures are supplied, they will automatically be converted to betas
+        
+        shape: {"geometric", "linear"}, optional
+            Shape of the automatically generated temperature/beta ladder when ``ladder`` is not provided. Ignored if ``ladder`` or ``beta_schedule`` is supplied
+        
+        Tmin: float, optional
+            Minimum temperature used to construct the ladder
+        
+        Tmax: float, optional
+            Maximum temperature used to construct the ladder
+        
+        Tskip: int, optional
+            Number of iterations between proposed temperature swaps
+        
+        isave: int, optional
+            Number of iterations between writing samples to disk
+        
+        covUpdate: int, optional
+            Number of iterations between adaptive covariance updates
+        
+        SCAMweight: int, optional
+            Weight of the SCAM jump proposal in the proposal cycle
+        
+        AMweight: int, optional
+            Weight of the Adaptive Metropolis jump proposal
+        
+        DEweight: int, optional
+            Weight of the Differential Evolution jump proposal
+        
+        NUTSweight: int, optional
+            Weight of the No-U-Turn Sampler proposal
+        
+        MALAweight: int, optional
+            Weight of the MALA proposal
+        
+        HMCweight: int, optional
+            Weight of the Hamiltonian Monte Carlo proposal
+        
+        burn: int, optional
+            Burn-in period before Differential Evolution jumps are enabled
+        
+        HMCstepsize: float, optional
+            Step size used in Hamiltonian Monte Carlo proposals
+        
+        HMCsteps: int, optional
+            Maximum number of leapfrog steps used in HMC trajectories
+        
+        maxIter: int, optional
+            Maximum number of iterations allowed for high-temperature chains. Defaults to ``2 * Niter`` in standard PT runs
+        
+        thin: int, optional
+            Thinning interval for recorded samples
+        
+        i0: int, optional
+            Initial iteration index. Used when resuming a previous run
+        
+        neff: int, optional
+            Target number of effective samples before stopping early
+        
+        writeHotChains: bool, optional
+            If True, write hot chains to disk
+        
+        hotChain: bool, optional
+            If True, include a beta = 0 chain
+        
+        beta_schedule: array_like, optional
+            Sequence of beta values to apply at each iteration. When provided, the sampler runs in varying-beta mode rather than standard parallel tempering
+        
+            This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually introduced by increasing beta from 0 to 1
+        
+            Values must lie in the interval [0, 1]
+        
+            When ``beta_schedule`` is used:
+                - Parallel tempering swaps are disabled
+                - Only single-chain runs are supported
+                - ``ladder`` and ``hotChain`` options cannot be used
+                - The total number of iterations is determined by the schedule
+                  length
+        
+        hold_iter: int, optional
+            Number of initial iterations to hold beta = 0 before following the provided ``beta_schedule``. This effectively prepends a plateau of beta = 0 values to the schedule
+        
+        nameChainTemps: bool, optional
+            If True, chain files are named using temperatures instead of betas
+        
+        Notes
+        -----
+        If ``beta_schedule`` is supplied, the sampler performs a varying-beta run where the inverse temperature changes deterministically at each iteration rather than using a parallel tempering ladder
+        """       
 
         # set up arrays to store lnprob, lnlike and chain
         # if picking up from previous run, don't re-initialize
