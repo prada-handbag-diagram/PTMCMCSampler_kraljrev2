@@ -41,42 +41,65 @@ def shift_array(arr, num, fill_value=0.0):
 
 class PTSampler(object):
     """
-    Parallel Tempering Markov Chain Monte-Carlo (PTMCMC) sampler.
-    This implementation uses an adaptive jump proposal scheme
-    by default using both standard and single component Adaptive
-    Metropolis (AM) and Differential Evolution (DE) jumps.
-
-    This implementation also makes use of MPI (mpi4py) to run
-    the parallel chains.
-
-    Along with the AM and DE jumps, the user can add custom
-    jump proposals with the ``addProposalToCycle`` fuction.
+    Parallel Tempering Markov Chain Monte Carlo (PTMCMC) sampler
     
-    The user can also choose to perform Model-Switch, which uses the Parallel Tempering aspect
-    of PTMCMC to sample from varying mixtures of two models'
-    posteriors.
-
-    @param ndim: number of dimensions in problem
-    @param logl: single log-likelihood function or tuple of log-likelihood functions if
-    using modelswitch
-    @param logp: single log prior function (must be normalized for evidence evaluation) or
-    tuple of log prior functions if using modelswitch
-    @param cov: Initial covariance matrix of model parameters for jump proposals
-    @param covinds: Indices of parameters for which to perform adaptive jumps
-    @param loglargs: any additional arguments (apart from the parameter vector) for
-    log likelihood
-    @param loglkwargs: any additional keyword arguments (apart from the parameter vector)
-    for log likelihood
-    @param logpargs: any additional arguments (apart from the parameter vector) for
-    log like prior
-    @param logl_grad: log-likelihood function, including gradients
-    @param logp_grad: prior function, including gradients
-    @param logpkwargs: any additional keyword arguments (apart from the parameter vector)
-    for log prior
-    @param outDir: Full path to output directory for chain files (default = ./chains)
-    @param verbose: Update current run-status to the screen (default=True)
-    @param resume: Resume from a previous chain (still in testing so beware) (default=False)
-
+    This sampler implements adaptive jump proposals including Adaptive Metropolis (AM), Single Component Adaptive Metropolis (SCAM), and Differential Evolution (DE). Gradient-based proposals such as HMC, MALA, and NUTS can optionally be included when gradient functions are supplied
+    
+    Parallel tempering is implemented using MPI via ``mpi4py`` to run multiple chains at different inverse temperatures
+    
+    Custom proposal distributions can be added using ``addProposalToCycle``
+    
+    The sampler also supports **model-switching**, where the parallel tempering machinery is used to sample from mixtures of two models' posteriors
+    
+    Parameters
+    ----------
+    ndim: int
+        Number of parameters in the model
+    
+    logl: callable or tuple of callables
+        Log-likelihood function. If model-switching is enabled, this should be a tuple containing two likelihood functions
+    
+    logp: callable or tuple of callables
+        Log-prior function. If model-switching is enabled, this should be a tuple containing two prior functions
+    
+    cov: array_like
+        Initial covariance matrix used for adaptive proposal jumps
+    
+    groups: list of arrays, optional
+        Parameter index groups used for adaptive covariance proposals. Each group defines a subset of parameters whose covariance structure is adapted together
+    
+    loglargs: list, optional
+        Additional positional arguments passed to the log-likelihood
+    
+    loglkwargs: dict, optional
+        Additional keyword arguments passed to the log-likelihood
+    
+    logpargs: list, optional
+        Additional positional arguments passed to the log-prior
+    
+    logpkwargs: dict, optional
+        Additional keyword arguments passed to the log-prior
+    
+    logl_grad: callable, optional
+        Gradient of the log-likelihood function
+    
+    logp_grad: callable, optional
+        Gradient of the log-prior function
+    
+    comm: MPI communicator, optional
+        MPI communicator used to coordinate chains
+    
+    outDir: str, optional
+        Directory where chain files and diagnostics are written
+    
+    verbose: bool, optional
+        If True, print run progress to the terminal
+    
+    resume: bool, optional
+        Resume sampling from an existing chain file
+    
+    seed: int, optional
+        Random seed used to initialize the sampler
     """
 
     def __init__(
@@ -224,6 +247,8 @@ class PTSampler(object):
         """
         Initialize MCMC quantities
         
+        Parameters
+        ----------
         Niter: int
             Number of iterations for the cold chain (beta = 1) when using standard PTMCMC
 
@@ -307,7 +332,7 @@ class PTSampler(object):
         * The number of iterations is determined by the schedule length
         """
 
-        # Varying-beta scheduling
+        # Varying-beta schedule (power posterior / thermodynamic integration mode)
         self.beta_schedule = None
         self.disable_pt = False
         scheduling_active = beta_schedule is not None
@@ -552,7 +577,10 @@ class PTSampler(object):
         lnprob2=None,
     ):
         """
-        Update chains after jump proposals
+        
+        Update internal chain storage after each accepted or rejected proposal
+        
+        Stores parameter values, log-likelihood, log-posterior, and current beta into the sampler buffers. Data are written to disk periodically according to the `isave` setting
 
         """
         # update buffer
@@ -952,17 +980,35 @@ class PTSampler(object):
         lnprob2=None,
     ):
         """
-        Function to carry out PTMCMC sampling.
-
-        @param p0: Initial parameter vector
-        @param lnlike0: Initial log-likelihood value
-        @param lnprob0: Initial log probability value
-        @param iter: iteration number
-
-        @return p0: next value of parameter vector after one MCMC step
-        @return lnlike0: next value of likelihood after one MCMC step
-        @return lnprob0: next value of posterior after one MCMC step
-
+        Perform a single PTMCMC iteration
+        
+        Parameters
+        ----------
+        p0: ndarray
+            Current parameter vector
+        
+        lnlike0: float
+            Current log-likelihood value
+        
+        lnprob0: float
+            Current log-posterior value
+        
+        iter: int
+            Current iteration index
+        
+        lnlike1, lnprob1, lnlike2, lnprob2 : float, optional
+            Model-switch likelihood and posterior values when model-switching mode is enabled
+        
+        Returns
+        -------
+        p0: ndarray
+            Updated parameter vector
+        
+        lnlike0: float
+            Updated log-likelihood value
+        
+        lnprob0: float
+            Updated log-posterior value
         """
         # update covariance matrix
         if (iter - 1) % self.covUpdate == 0 and (iter - 1) != 0 and self.MPIrank == 0:
@@ -1220,15 +1266,16 @@ class PTSampler(object):
 
     def _writeToFile(self, iter):
         """
-        Function to write chain file. File has ndim+5 columns,
-        appended to the parameter values are log-posterior (unnormalized),
-        log-likelihood, acceptance rate, and PT acceptance rate. If doing modelswitch
-        there are an additional 4 colums (ndim+9 total), log-posterior of model
-        1, log-likelihood of model 1, log-posterior of model 2, and
-        log-likelihood of model 2.
-        Rates are as of time of writing.
-
-        @param iter: Iteration of sampler
+        Write sampler output to the chain file
+        
+        Each row written contains the parameter vector followed by diagnostic quantities including the log-posterior, log-likelihood, acceptance rate, and parallel-tempering acceptance rate
+        
+        In model-switching mode, additional columns are written for the log-posterior and log-likelihood of each model
+        
+        Parameters
+        ----------
+        iter: int
+            Current iteration number
 
         """
 
@@ -1296,11 +1343,15 @@ class PTSampler(object):
     # function to update covariance matrix for jump proposals
     def _updateRecursive(self, iter, mem):
         """
-        Function to recursively update sample covariance matrix.
-
-        @param iter: Iteration of sampler
-        @param mem: Number of steps between updates
-
+        Recursively update the adaptive covariance matrix used for proposal jumps
+        
+        Parameters
+        ----------
+        iter: int
+            Current iteration index
+        
+        mem: int
+            Number of samples used in the covariance update window
         """
         it = iter - mem
         ndim = self.ndim
@@ -1333,12 +1384,17 @@ class PTSampler(object):
     # update DE buffer samples
     def _updateDEbuffer(self, iter, burn):
         """
-        Update Differential Evolution with last burn
-        values in the total chain
-
-        @param iter: Iteration of sampler
-        @param burn: Total number of samples in DE buffer
-
+        Update the Differential Evolution proposal buffer
+        
+        The DE buffer stores recent chain samples used to construct differential evolution proposal jumps
+        
+        Parameters
+        ----------
+        iter: int
+            Current iteration index
+        
+        burn: int
+            Size of the DE buffer window
         """
 
         self._DEbuffer = shift_array(self._DEbuffer, -len(self._AMbuffer))  # shift DEbuffer to the left
@@ -1347,17 +1403,28 @@ class PTSampler(object):
     # SCAM jump
     def covarianceJumpProposalSCAM(self, x, iter, beta):
         """
-        Single Component Adaptive Jump Proposal. This function will occasionally
-        jump in more than 1 parameter. It will also occasionally use different
-        jump sizes to ensure proper mixing.
-
-        @param x: Parameter vector at current position
-        @param iter: Iteration of sampler
-        @param beta: Inverse temperature of chain
-
-        @return: q: New position in parameter space
-        @return: qxy: Forward-Backward jump probability
-
+        Single Component Adaptive Metropolis (SCAM) proposal
+        
+        Randomly selects a parameter group and proposes a jump using the adaptive covariance structure of that group
+        
+        Parameters
+        ----------
+        x: ndarray
+            Current parameter vector
+        
+        iter: int
+            Current iteration number
+        
+        beta: float
+            Inverse temperature of the chain
+        
+        Returns
+        -------
+        q: ndarray
+            Proposed parameter vector
+        
+        qxy: float
+            Log Hastings ratio contribution
         """
 
         q = x.copy()
@@ -1407,16 +1474,28 @@ class PTSampler(object):
     # AM jump
     def covarianceJumpProposalAM(self, x, iter, beta):
         """
-        Adaptive Jump Proposal. This function will occasionally
-        use different jump sizes to ensure proper mixing.
-
-        @param x: Parameter vector at current position
-        @param iter: Iteration of sampler
-        @param beta: Inverse temperature of chain
-
-        @return: q: New position in parameter space
-        @return: qxy: Forward-Backward jump probability
-
+        Adaptive Metropolis (AM) proposal
+        
+        Uses the adaptive covariance estimate of the selected parameter group to generate a correlated proposal
+        
+        Parameters
+        ----------
+        x: ndarray
+            Current parameter vector
+        
+        iter: int
+            Current iteration number
+        
+        beta: float
+            Inverse temperature of the chain
+        
+        Returns
+        -------
+        q: ndarray
+            Proposed parameter vector
+        
+        qxy: float
+            Log Hastings ratio contribution
         """
 
         q = x.copy()
@@ -1464,16 +1543,28 @@ class PTSampler(object):
     # Differential evolution jump
     def DEJump(self, x, iter, beta):
         """
-        Differential Evolution Jump. This function will  occasionally
-        use different jump sizes to ensure proper mixing.
-
-        @param x: Parameter vector at current position
-        @param iter: Iteration of sampler
-        @param beta: Inverse temperature of chain
-
-        @return: q: New position in parameter space
-        @return: qxy: Forward-Backward jump probability
-
+        Differential Evolution (DE) proposal
+        
+        Generates a proposal using the difference between two samples drawn from the DE buffer
+        
+        Parameters
+        ----------
+        x: ndarray
+            Current parameter vector
+        
+        iter: int
+            Current iteration number
+        
+        beta: float
+            Inverse temperature of the chain
+        
+        Returns
+        -------
+        q: ndarray
+            Proposed parameter vector
+        
+        qxy: float
+            Log Hastings ratio contribution
         """
 
         # get old parameters
@@ -1519,11 +1610,15 @@ class PTSampler(object):
     # add jump proposal distribution functions
     def addProposalToCycle(self, func, weight):
         """
-        Add jump proposal distributions to cycle with a given weight.
+        Add a proposal distribution to the sampler proposal cycle
 
-        @param func: jump proposal function
-        @param weight: jump proposal function weight in cycle
-
+        Parameters
+        ----------
+        func: callable
+            Proposal function to add
+        
+        weight: int
+            Relative weight of the proposal in the proposal cycle
         """
 
         # get length of cycle so far
@@ -1548,12 +1643,14 @@ class PTSampler(object):
     # add auxilary jump proposal distribution functions
     def addAuxilaryJump(self, func):
         """
-        Add auxilary jump proposal distribution. This will be called after every
-        standard jump proposal. Examples include cyclic boundary conditions and
-        pulsar phase fixes
-
-        @param func: jump proposal function
-
+        Register an auxiliary jump proposal
+        
+        Auxiliary jumps are applied after each standard proposal. Examples include cyclic boundary corrections or parameter transformations
+        
+        Parameters
+        ----------
+        func: callable
+            Auxiliary proposal function
         """
 
         # set auxilary jump
@@ -1579,7 +1676,7 @@ class PTSampler(object):
     # call proposal functions from cycle
     def _jump(self, x, iter):
         """
-        Call Jump proposals
+        Randomly select and execute a proposal from the proposal cycle. Returns the proposed state, Hastings ratio contribution, and the name of the proposal used
 
         """
 
