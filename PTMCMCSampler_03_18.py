@@ -371,7 +371,6 @@ class PTSampler(object):
             self.beta_schedule = full
             self.beta = float(full[0])
 
-            #Warning if thin is not equal to 1 when beta scheduling
             # Warn if thinning skips beta schedule points
             if thin != 1:
                 n_total = len(full)
