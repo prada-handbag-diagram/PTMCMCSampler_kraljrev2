@@ -370,6 +370,20 @@ class PTSampler(object):
     
             self.beta_schedule = full
             self.beta = float(full[0])
+
+            #Warning if thin is not equal to 1 when beta scheduling
+            # Warn if thinning skips beta schedule points
+            if thin != 1:
+                n_total = len(full)
+                n_used = (n_total + thin - 1) // thin  # ceil division
+            
+                percent = 100.0 * n_used / n_total
+            
+                warnings.warn(
+                    f"beta_schedule is active with thin={thin}. "
+                    f"You are using {percent:.1f}% ({n_used}/{n_total}) of the scheduled beta points.",
+                    RuntimeWarning
+                )
     
             # Override Niter/maxIter based on schedule, full.size is the number of beta values for stored states, including the initial state, so the number of transition steps is one less. 
             Niter = int(full.size) - 1
