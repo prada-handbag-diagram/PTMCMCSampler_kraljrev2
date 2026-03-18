@@ -379,8 +379,8 @@ class PTSampler(object):
                 percent = 100.0 * n_used / n_total
             
                 warnings.warn(
-                    f"beta_schedule is active with thin={thin}. "
-                    f"You are using {percent:.1f}% ({n_used}/{n_total}) of the scheduled beta points.",
+                    f"[beta_schedule] thin={thin} → using {percent:.1f}% "
+                    f"of beta grid ({n_used}/{n_total} points retained)",
                     RuntimeWarning
                 )
     
