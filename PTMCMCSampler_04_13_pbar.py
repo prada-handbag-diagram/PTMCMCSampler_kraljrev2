@@ -25,6 +25,15 @@ except ImportError:
     #    )
     pass
 
+def _in_jupyter_notebook():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+        if shell is None:
+            return False
+        return shell.__class__.__name__ == "ZMQInteractiveShell"
+    except Exception:
+        return False
 
 def shift_array(arr, num, fill_value=0.0):
     result = np.empty_like(arr)
