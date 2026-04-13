@@ -1302,7 +1302,7 @@ class PTSampler(object):
 
             # beta column only for varying-beta runs
             if self.write_beta_col:
-                self._chainfile.write("%f\t" % self._beta[ind])
+                self._chainfile.write("%22.22f\t" % self._beta[ind])
 
             # then parameters (always)
             self._chainfile.write(
