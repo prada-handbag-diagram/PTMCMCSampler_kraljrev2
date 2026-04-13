@@ -221,6 +221,8 @@ class PTSampler(object):
 
         # indicator for auxilary jumps
         self.aux = []
+        self._is_notebook = _in_jupyter_notebook()
+        self._pbar = None
 
     def initialize(
         self,
@@ -641,25 +643,46 @@ class PTSampler(object):
                 np.save(self.outDir + "/cov.npy", self.cov)
 
             if self.MPIrank == 0 and self.verbose:
-                if iter > 0:
-                    sys.stdout.write("\r")
                 percent = iter / self.Niter * 100  # Percent of total work finished
                 acceptance = self.naccepted / iter if iter > 0 else 0
                 elapsed = time.time() - self.tstart
-                if self.resume:
-                    # Percentage of new work done
-                    percentnew = (
-                        (iter - self.resumeLength * self.thin) / (self.Niter - self.resumeLength * self.thin) * 100
-                    )
-                    sys.stdout.write(
-                        "Finished %2.2f percent (%2.2f percent of new work) in %f s Acceptance rate = %g"
-                        % (percent, percentnew, elapsed, acceptance)
-                    )
+
+                if self._is_notebook and self._pbar is not None:
+                    self._pbar.n = iter
+                    if self.resume:
+                        percentnew = (
+                            (iter - self.resumeLength * self.thin) / (self.Niter - self.resumeLength * self.thin) * 100
+                        )
+                        self._pbar.set_postfix(
+                            percent=f"{percent:2.2f}",
+                            percent_new=f"{percentnew:2.2f}",
+                            acc=f"{acceptance:g}",
+                            elapsed=f"{elapsed:.2f}s",
+                        )
+                    else:
+                        self._pbar.set_postfix(
+                            percent=f"{percent:2.2f}",
+                            acc=f"{acceptance:g}",
+                            elapsed=f"{elapsed:.2f}s",
+                        )
+                    self._pbar.refresh()
                 else:
-                    sys.stdout.write(
-                        "Finished %2.2f percent in %f s Acceptance rate = %g" % (percent, elapsed, acceptance)
-                    )
-                sys.stdout.flush()
+                    if iter > 0:
+                        sys.stdout.write("\r")
+                    if self.resume:
+                        percentnew = (
+                            (iter - self.resumeLength * self.thin) / (self.Niter - self.resumeLength * self.thin) * 100
+                        )
+                        sys.stdout.write(
+                            "Finished %2.2f percent (%2.2f percent of new work) in %f s Acceptance rate = %g"
+                            % (percent, percentnew, elapsed, acceptance)
+                        )
+                    else:
+                        sys.stdout.write(
+                            "Finished %2.2f percent in %f s Acceptance rate = %g"
+                            % (percent, elapsed, acceptance)
+                        )
+                    sys.stdout.flush()
 
     def sample(
         self,
@@ -942,6 +965,11 @@ class PTSampler(object):
 
         self.comm.barrier()
         self.tstart = time.time()
+        if self.MPIrank == 0 and self.verbose and self._is_notebook:
+            from tqdm.notebook import tqdm
+            initial_iter = i0
+            total_iters = self.Niter
+            self._pbar = tqdm(total=total_iters, initial=initial_iter, desc="PTMCMC")
 
         # start iterations
         iter = i0
@@ -987,6 +1015,9 @@ class PTSampler(object):
 
             if runComplete:
                 self.writeOutput(iter)  # Possibly write partial block
+                if self.MPIrank == 0 and self._pbar is not None:
+                    self._pbar.close()
+                    self._pbar = None
                 if self.MPIrank == 0 and self.verbose:
                     print(message)
 
