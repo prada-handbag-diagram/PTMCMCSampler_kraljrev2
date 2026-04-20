@@ -789,7 +789,7 @@ class PTSampler(object):
             Maximum number of leapfrog steps used in HMC trajectories
         
         maxIter: int, optional
-            Maximum number of iterations allowed for high-temperature chains. Defaults to ``2 * Niter`` in standard PT runs
+            Maximum number of iterations allowed for high-temperature chains. Defaults to ``Niter`` when not supplied
         
         thin: int, optional
             Thinning interval for recorded samples
@@ -876,7 +876,7 @@ class PTSampler(object):
             if self.write_beta_col:
                 self.beta = self.resumechain[last_row, 0]
             else:
-                # legacy format  beta comes from ladder
+                # Legacy format: beta comes from the ladder
                 self.beta = self.ladder[self.MPIrank]
 
             p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
@@ -1115,7 +1115,7 @@ class PTSampler(object):
             # randomize cycle
             self.randomizeProposalCycle()
         
-        # Recompute lnprob0 under current beta
+        # Scheduled beta runs change targets by state, so update beta before proposing
         if getattr(self, "beta_schedule", None) is not None:
             idx = iter
             if idx < 0 or idx >= len(self.beta_schedule):
