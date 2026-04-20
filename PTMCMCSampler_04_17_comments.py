@@ -25,7 +25,7 @@ except ImportError:
     #    )
     pass
 
-def _in_jupyter_notebook():
+def _in_jupyter_notebook(): # Detect notebook execution so progress bar can use tqdm.notebook instead of terminal text
     try:
         from IPython import get_ipython
         shell = get_ipython()
@@ -145,7 +145,7 @@ class PTSampler(object):
 
         self.ndim = ndim
 
-        # Infer model-switching from the *type* of logl/logp (no user-facing flag)
+        # Infer model-switch mode from tuple-valued logl/logp instead of passing a separate MSTI flag
         logl_is_tuple = isinstance(logl, tuple)
         logp_is_tuple = isinstance(logp, tuple)
 
@@ -165,7 +165,7 @@ class PTSampler(object):
                     "For model-switching, logl and logp must be tuples of length 2."
                 )
 
-            # Keep your existing mapping (your code treats index 1 as model 1)
+            # Preserve the previous model ordering: tuple index 1 is model 1 and index 0 is model 2
             self.logl1 = _function_wrapper(logl[1], loglargs, loglkwargs)
             self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs)
             self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs)
@@ -221,6 +221,7 @@ class PTSampler(object):
 
         # indicator for auxilary jumps
         self.aux = []
+        # Keep progress bar state on the sampler so a notebook run updates one widget throughout sampling
         self._is_notebook = _in_jupyter_notebook()
         self._pbar = None
 
@@ -343,7 +344,7 @@ class PTSampler(object):
         * The number of iterations is determined by the schedule length
         """
 
-        # Varying-beta schedule (power posterior / thermodynamic integration mode)
+        # Scheduled beta mode replaces the old beta_step-on-acceptance logic with an explicit beta value for each schedule state
         self.beta_schedule = None
         self.disable_pt = False
         scheduling_active = beta_schedule is not None
@@ -351,6 +352,7 @@ class PTSampler(object):
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0")
 
+        # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
         if scheduling_active:
             if hotChain:
                 raise ValueError("hotChain is not compatible with beta_schedule runs")
@@ -369,6 +371,7 @@ class PTSampler(object):
             # Parse beta_schedule as array-like custom schedule
             beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
                 
+            # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
             hold = np.zeros(int(hold_iter), dtype=float)
             full = np.concatenate([hold, beta_core])
     
@@ -395,7 +398,7 @@ class PTSampler(object):
                     RuntimeWarning
                 )
     
-            # Override Niter/maxIter based on schedule, full.size is the number of beta values for stored states, including the initial state, so the number of transition steps is one less. 
+            # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1
             Niter = int(full.size) - 1
             if Niter < 0:
                 raise ValueError("beta_schedule must contain at least one value")
@@ -428,7 +431,7 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Output/resume format flag (preserve legacy format unless feature is active)
+        # Only scheduled-beta chains add a leading beta column, legacy PT output keeps its old layout
         self.write_beta_col = (self.beta_schedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
@@ -615,10 +618,12 @@ class PTSampler(object):
         if iter % self.thin == 0:
             ind = int(iter / self.thin)
             self._chain[ind, :] = p0
+            # Save the beta actually used for this sample so scheduled beta output and resume agree
             self._beta[ind] = self.beta
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
 
+            # Use None checks rather than truthiness so zero valued log probabilities are still stored
             if (lnlike1 is not None) and (lnlike2 is not None) and (lnprob1 is not None) and (lnprob2 is not None):
                 self._lnlike1[ind] = lnlike1
                 self._lnprob1[ind] = lnprob1
@@ -647,6 +652,7 @@ class PTSampler(object):
                 acceptance = self.naccepted / iter if iter > 0 else 0
                 elapsed = time.time() - self.tstart
 
+                # In notebooks, refresh the tqdm widget instead of printing-carriage return status lines
                 if self._is_notebook and self._pbar is not None:
                     self._pbar.n = iter
                     if self.resume:
@@ -860,10 +866,12 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps
             )
 
-        # compute lnprob for initial point in chain... if resuming, start from the LAST saved point in the chain
+        # Compute lnprob for initial point in chain... if resuming, start from the LAST saved point in the chain
         if self.resume and self.resumeLength > 0:
 
+            # Restart from the last saved sample rather than replaying the first row of the old chain
             last_row = self.resumeLength - 1
+            # Scheduled beta output has a leading beta column, so parameter values start one column later
             param_start = 1 if self.write_beta_col else 0
 
             if self.write_beta_col:
@@ -924,7 +932,7 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
-        # If beta_schedule is active, make the current state consistent with the schedule
+        # Recompute the starting posterior at the scheduled beta, including when resuming mid schedule
         if getattr(self, "beta_schedule", None) is not None:
             current_idx = i0
             if current_idx < 0 or current_idx >= len(self.beta_schedule):
@@ -965,6 +973,7 @@ class PTSampler(object):
 
         self.comm.barrier()
         self.tstart = time.time()
+        # Only rank 0 creates a notebook progress bar, worker ranks stay silent
         if self.MPIrank == 0 and self.verbose and self._is_notebook:
             from tqdm.notebook import tqdm
             initial_iter = i0
@@ -1015,6 +1024,7 @@ class PTSampler(object):
 
             if runComplete:
                 self.writeOutput(iter)  # Possibly write partial block
+                # Close the notebook progress bar so completed runs do not leave a stale widget
                 if self.MPIrank == 0 and self._pbar is not None:
                     self._pbar.close()
                     self._pbar = None
@@ -1145,9 +1155,11 @@ class PTSampler(object):
 
         elif self.modelswitch:  # Using modelswitch
 
+            # Model-switch mode now evaluates both models on the same parameter vector, the old per-model slicing path is gone
             lp1 = self.logp1(y)
             lp2 = self.logp2(y)
 
+            # Set all model specific log values on invalid proposals so rejected jumps do not leave undefined variables
             if lp1 == -np.inf or lp2 == -np.inf:
                 newlnlike = -np.inf
                 newlnprob = -np.inf
@@ -1206,7 +1218,8 @@ class PTSampler(object):
             return p0, lnlike0, lnprob0, lnlike1, lnprob1, lnlike2, lnprob2
 
         else:
-            # temperature swap
+            # Temperature swap
+            # Scheduled-beta runs control beta directly, so skip PT swaps whenever that mode disables parallel tempering
             if (not getattr(self, "disable_pt", False)) and (iter % self.Tskip == 0) and (self.nchain > 1):
                 p0, lnlike0, lnprob0 = self.PTswap(p0, lnlike0, lnprob0, iter)
 
@@ -1238,6 +1251,7 @@ class PTSampler(object):
             new_log_Ls = [None] * self.nchain
 
             # swap_map maps "chain index" -> "which gathered state it currently holds"
+            # Track which state each chain owns so multiple adjacent swaps can be proposed without overwriting states
             swap_map = list(range(self.nchain))
 
             # Propose swaps between adjacent chains, from hot end toward cold end
