@@ -261,7 +261,7 @@ class PTSampler(object):
         Parameters
         ----------
         Niter: int
-            Number of iterations for the cold chain (beta = 1) when using standard PTMCMC
+            Number of iterations for the cold chain in standard PTMCMC runs. Ignored when `beta_schedule` is provided, because the schedule length determines the run length
 
         ladder: array-like, optional
             User-defined temperature or beta ladder. Either temperatures or inverse temperatures (betas) may be supplied
@@ -321,15 +321,15 @@ class PTSampler(object):
             If True, include a beta=0 hot chain
 
         beta_schedule: array-like, optional
-            Optional schedule of inverse temperatures (betas) to apply at each iteration. If provided, parallel tempering is disabled and the chain runs as a single chain whose beta changes over time
+            Optional schedule of inverse temperatures (betas), interpreted as one beta value per sampler state. If provided, parallel tempering is disabled and the chain runs as a single chain whose beta changes deterministically over time
 
             Values must lie in the interval [0, 1]
 
             This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually turned on
 
         hold_iter: int, optional
-            Number of initial iterations for which beta is fixed to 0 before following `beta_schedule`. This effectively prepends a plateau of beta = 0 values to the schedule
-
+            Number of initial schedule states for which beta is fixed to 0 before following `beta_schedule`. This prepends a plateau of beta = 0 values to the schedule
+            
         nameChainTemps: bool
             If True, chain files are named using temperatures instead of betas
 
@@ -340,7 +340,7 @@ class PTSampler(object):
         * Parallel tempering is disabled
         * Only single-chain runs are supported
         * `ladder` and `hotChain` options are not allowed
-        * The number of iterations is determined by the schedule length
+        * The number of transition steps is `len(full_schedule) - 1`
         """
 
         # Scheduled beta mode replaces the old beta_step-on-acceptance logic with an explicit beta value for each schedule state
@@ -732,7 +732,7 @@ class PTSampler(object):
             Initial parameter vector
         
         Niter: int
-            Number of iterations for the cold chain (beta = 1) in standard PTMCMC runs
+            Number of iterations for the cold chain in standard PTMCMC runs. Ignored when ``beta_schedule`` is provided, because the schedule length determines the run length
         
         Bmax: float, optional
             Maximum beta value (default = 1)
@@ -807,7 +807,7 @@ class PTSampler(object):
             If True, include a beta = 0 chain
         
         beta_schedule: array_like, optional
-            Sequence of beta values to apply at each iteration. When provided, the sampler runs in varying-beta mode rather than standard parallel tempering
+            Sequence of inverse temperatures (betas), interpreted as one beta value per sampler state. When provided, the sampler runs in varying-beta mode rather than standard parallel tempering
         
             This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually introduced by increasing beta from 0 to 1
         
@@ -817,18 +817,18 @@ class PTSampler(object):
                 - Parallel tempering swaps are disabled
                 - Only single-chain runs are supported
                 - ``ladder`` and ``hotChain`` options cannot be used
-                - The total number of iterations is determined by the schedule
-                  length
+                - If ``hold_iter`` is used, a beta = 0 plateau is prepended
+                - The number of transition steps is ``len(full_schedule) - 1``
         
         hold_iter: int, optional
-            Number of initial iterations to hold beta = 0 before following the provided ``beta_schedule``. This effectively prepends a plateau of beta = 0 values to the schedule
-        
+            Number of initial schedule states to hold beta = 0 before following the provided ``beta_schedule``. This prepends a plateau of beta = 0 values to the schedule
+            
         nameChainTemps: bool, optional
             If True, chain files are named using temperatures instead of betas
         
         Notes
         -----
-        If ``beta_schedule`` is supplied, the sampler performs a varying-beta run where the inverse temperature changes deterministically at each iteration rather than using a parallel tempering ladder
+        If ``beta_schedule`` is supplied, the sampler performs a varying-beta run where the inverse temperature changes deterministically by schedule state rather than using a parallel tempering ladder
         """       
 
         # set up arrays to store lnprob, lnlike and chain
