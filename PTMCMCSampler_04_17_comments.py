@@ -931,7 +931,8 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
-        # Recompute the starting posterior at the scheduled beta, including when resuming mid schedule
+        # Scheduled-beta runs change the target distribution each iteration
+        # so update beta and recompute lnprob0 before proposing the next move
         if getattr(self, "beta_schedule", None) is not None:
             current_idx = i0
             if current_idx < 0 or current_idx >= len(self.beta_schedule):
