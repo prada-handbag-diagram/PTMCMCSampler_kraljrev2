@@ -1,4 +1,3 @@
-print("Using most up to date modelswitch PTMCMC")
 import os
 import sys
 import time
