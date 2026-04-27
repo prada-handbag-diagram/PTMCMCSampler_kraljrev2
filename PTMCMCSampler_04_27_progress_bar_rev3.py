@@ -335,7 +335,7 @@ class PTSampler(object):
                 percent = 100.0 * n_used / n_total
             
                 warnings.warn(
-                    f"[beta_schedule] thin={thin}  using {percent:.1f}% "
+                    f"[beta_schedule] thin={thin} -> using {percent:.1f}% "
                     f"of beta grid ({n_used}/{n_total} points retained)",
                     RuntimeWarning
                 )
@@ -1181,7 +1181,9 @@ class PTSampler(object):
         p0 = self.comm.scatter(new_p0s if self.MPIrank == 0 else None, root=0)
         lnlike0 = self.comm.scatter(new_log_Ls if self.MPIrank == 0 else None, root=0)
 
-        # Track acceptance stats
+        # Track acceptance stats Each PTswap call counts as
+        # one swap proposal opportunity for the chain; nswap_accepted is
+        # incremented by the accepted-swap indicator scattered from rank 0
         self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
         self.swapProposed += 1
 
