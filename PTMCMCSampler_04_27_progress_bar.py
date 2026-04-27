@@ -24,7 +24,10 @@ except ImportError:
     #    )
     pass
 
-def _in_jupyter_notebook(): # Detect notebook execution so progress bar can use tqdm.notebook instead of terminal text
+def _in_jupyter_notebook():
+    """
+    Return True when running inside a Jupyter notebook.
+    """
     try:
         from IPython import get_ipython
         shell = get_ipython()
@@ -49,67 +52,46 @@ def shift_array(arr, num, fill_value=0.0):
 
 class PTSampler(object):
     """
-    Parallel Tempering Markov Chain Monte Carlo (PTMCMC) sampler
-    
-    This sampler implements adaptive jump proposals including Adaptive Metropolis (AM), Single Component Adaptive Metropolis (SCAM), and Differential Evolution (DE). Gradient-based proposals such as HMC, MALA, and NUTS can optionally be included when gradient functions are supplied
-    
-    Parallel tempering is implemented using MPI via ``mpi4py`` to run multiple chains at different inverse temperatures
-    
-    Custom proposal distributions can be added using ``addProposalToCycle``
-    
-    The sampler also supports **model-switching**, where the parallel tempering machinery is used to sample from mixtures of two models' posteriors
-    
-    Parameters
-    ----------
-    ndim: int
-        Number of parameters in the model
-    
-    logl: callable or tuple of callables
-        Log-likelihood function. If model-switching is enabled, this should be a tuple containing two likelihood functions
-    
-    logp: callable or tuple of callables
-        Log-prior function. If model-switching is enabled, this should be a tuple containing two prior functions
-    
-    cov: array_like
-        Initial covariance matrix used for adaptive proposal jumps
-    
-    groups: list of arrays, optional
-        Parameter index groups used for adaptive covariance proposals. Each group defines a subset of parameters whose covariance structure is adapted together
-    
-    loglargs: list, optional
-        Additional positional arguments passed to the log-likelihood
-    
-    loglkwargs: dict, optional
-        Additional keyword arguments passed to the log-likelihood
-    
-    logpargs: list, optional
-        Additional positional arguments passed to the log-prior
-    
-    logpkwargs: dict, optional
-        Additional keyword arguments passed to the log-prior
-    
-    logl_grad: callable, optional
-        Gradient of the log-likelihood function
-    
-    logp_grad: callable, optional
-        Gradient of the log-prior function
-    
-    comm: MPI communicator, optional
-        MPI communicator used to coordinate chains
-    
-    outDir: str, optional
-        Directory where chain files and diagnostics are written
-    
-    verbose: bool, optional
-        If True, print run progress to the terminal
-    
-    resume: bool, optional
-        Resume sampling from an existing chain file
-    
-    seed: int, optional
-        Random seed used to initialize the sampler
-    """
+    Parallel Tempering Markov Chain Monte-Carlo (PTMCMC) sampler.
+    This implementation uses an adaptive jump proposal scheme
+    by default using both standard and single component Adaptive
+    Metropolis (AM) and Differential Evolution (DE) jumps.
 
+    This implementation also makes use of MPI (mpi4py) to run
+    the parallel chains.
+
+    Along with the AM and DE jumps, the user can add custom
+    jump proposals with the ``addProposalToCycle`` function.
+
+    The sampler also supports model-switching when tuples of
+    log-likelihood and log-prior functions are supplied.
+
+    @param ndim: number of dimensions in problem
+    @param logl: single log-likelihood function or tuple of log-likelihood
+    functions if using model-switching
+    @param logp: single log prior function (must be normalized for evidence
+    evaluation) or tuple of log prior functions if using model-switching
+    @param cov: Initial covariance matrix of model parameters for jump proposals
+    @param groups: Optional list of parameter groups for which to perform
+    adaptive jumps. If not supplied, all parameters are grouped together.
+    @param loglargs: any additional arguments (apart from the parameter vector)
+    for log likelihood
+    @param loglkwargs: any additional keyword arguments (apart from the parameter
+    vector) for log likelihood
+    @param logpargs: any additional arguments (apart from the parameter vector)
+    for log prior
+    @param logpkwargs: any additional keyword arguments (apart from the parameter
+    vector) for log prior
+    @param logl_grad: log-likelihood function, including gradients
+    @param logp_grad: prior function, including gradients
+    @param comm: MPI communicator used to coordinate chains
+    @param outDir: Full path to output directory for chain files (default = ./chains)
+    @param verbose: Update current run-status to the screen (default=True)
+    @param resume: Resume from a previous chain (still in testing so beware)
+    (default=False)
+    @param seed: Random seed used to initialize the sampler
+
+    """
     def __init__(
         self,
         ndim,
@@ -257,90 +239,51 @@ class PTSampler(object):
     ):
         """
         Initialize MCMC quantities
-        
-        Parameters
-        ----------
-        Niter: int
-            Number of iterations for the cold chain in standard PTMCMC runs. Ignored when `beta_schedule` is provided, because the schedule length determines the run length
 
-        ladder: array-like, optional
-            User-defined temperature or beta ladder. Either temperatures or inverse temperatures (betas) may be supplied
+        @param Niter: Number of iterations to use for T = 1 chain. If
+        beta_schedule is supplied, this is replaced by len(beta_schedule)-1
+        after any hold_iter plateau is prepended.
+        @param Bmax: Maximum beta in ladder (default=1)
+        @param Bmin: Minimum beta in ladder (default=None)
+        @param ladder: User defined temperature/beta ladder. Either scheme accepted.
+        @param shape: Specifies shape of beta/temperature ladder if a ladder is
+        not already given (default='geometric')
+        @param Tmin: Minimum temperature in ladder (default=None)
+        @param Tmax: Maximum temperature in ladder (default=None)
+        @param Tskip: Number of steps between proposed temperature swaps
+        (default=100)
+        @param isave: Write to file every isave samples (default=1000)
+        @param covUpdate: Number of iterations between AM covariance updates
+        (default=1000)
+        @param SCAMweight: Weight of SCAM jumps in overall jump cycle
+        (default=30)
+        @param AMweight: Weight of AM jumps in overall jump cycle (default=20)
+        @param DEweight: Weight of DE jumps in overall jump cycle (default=50)
+        @param NUTSweight: Weight of the NUTS jumps in jump cycle (default=20)
+        @param MALAweight: Weight of the MALA jumps in jump cycle (default=0)
+        @param HMCweight: Weight of the HMC jumps in jump cycle (default=20)
+        @param HMCstepsize: Step-size of the HMC jumps (default=0.1)
+        @param HMCsteps: Maximum number of steps in an HMC trajectory
+        (default=300)
+        @param burn: Burn in time (DE jumps added after this iteration)
+        (default=50000)
+        @param maxIter: Maximum number of iterations for high temperature chains
+        (default=Niter)
+        @param thin: MCMC samples are recorded every thin samples
+        @param i0: Iteration to start MCMC (if i0 != 0, do not re-initialize)
+        @param neff: Number of effective samples to collect before terminating
+        @param writeHotChains: If True, write hot chains to disk
+        @param hotChain: If True, include a beta=0 hot chain
+        @param beta_schedule: Optional sequence of inverse temperatures/betas,
+        interpreted as one beta value per sampler state. If supplied, the run
+        uses a single chain with beta changing deterministically by schedule
+        state, parallel tempering is disabled, and ladder/hotChain are not used.
+        Values must lie in [0, 1].
+        @param hold_iter: Number of initial beta=0 schedule states to prepend
+        before following beta_schedule.
+        @param nameChainTemps: Reverts to temperature naming convention of
+        chains (default=False)
 
-        shape: {"geometric", "linear"}, optional
-            Shape of the automatically generated temperature/beta ladder when `ladder` is not supplied. Ignored if `ladder` or `beta_schedule` is provided
-
-        Bmax: float
-            Maximum beta value (default = 1)
-
-        Bmin: float, optional
-            Minimum beta value
-
-        Tmin, Tmax: float, optional
-            Alternative temperature specification for ladder construction
-
-        Tskip: int
-            Number of iterations between parallel-tempering swap attempts
-
-        isave: int
-            Number of iterations between writing samples to disk
-
-        covUpdate: int
-            Number of iterations between adaptive covariance updates
-
-        SCAMweight, AMweight, DEweight: int
-            Relative weights of SCAM, AM, and Differential Evolution jump proposals
-
-        NUTSweight, HMCweight, MALAweight: int
-            Relative weights of gradient-based jump proposals
-
-        burn: int
-            Burn-in iterations before enabling Differential Evolution jumps
-
-        HMCstepsize: float
-            Step size for HMC proposals
-
-        HMCsteps: int
-            Maximum trajectory length for HMC proposals
-
-        maxIter: int, optional
-            Maximum number of iterations for high-temperature chains
-
-        thin: int
-            Thinning interval for storing samples
-
-        i0: int
-            Initial iteration index when resuming runs
-
-        neff: int, optional
-            Target effective sample size for early termination
-
-        writeHotChains: bool
-            If True, write hot chains to disk
-
-        hotChain: bool
-            If True, include a beta=0 hot chain
-
-        beta_schedule: array-like, optional
-            Optional schedule of inverse temperatures (betas), interpreted as one beta value per sampler state. If provided, parallel tempering is disabled and the chain runs as a single chain whose beta changes deterministically over time
-
-            Values must lie in the interval [0, 1]
-
-            This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually turned on
-
-        hold_iter: int, optional
-            Number of initial schedule states for which beta is fixed to 0 before following `beta_schedule`. This prepends a plateau of beta = 0 values to the schedule
-            
-        nameChainTemps: bool
-            If True, chain files are named using temperatures instead of betas
-
-        Notes
-        -----
-        When `beta_schedule` is provided:
-
-        * Parallel tempering is disabled
-        * Only single-chain runs are supported
-        * `ladder` and `hotChain` options are not allowed
-        * The number of transition steps is `len(full_schedule) - 1`
         """
 
         # Scheduled beta mode replaces the old beta_step-on-acceptance logic with an explicit beta value for each schedule state
@@ -603,10 +546,20 @@ class PTSampler(object):
         lnprob2=None,
     ):
         """
-        
-        Update internal chain storage after each accepted or rejected proposal
-        
-        Stores parameter values, log-likelihood, log-posterior, and current beta into the sampler buffers. Data are written to disk periodically according to the `isave` setting
+        Update chains after jump proposals.
+
+        @param p0: Current parameter vector
+        @param lnlike0: Current log-likelihood value
+        @param lnprob0: Current log posterior value
+        @param iter: Current iteration number
+        @param lnlike1: Current model 1 log-likelihood value, if using
+        model-switching
+        @param lnprob1: Current model 1 log posterior value, if using
+        model-switching
+        @param lnlike2: Current model 2 log-likelihood value, if using
+        model-switching
+        @param lnprob2: Current model 2 log posterior value, if using
+        model-switching
 
         """
         # update buffer
@@ -635,7 +588,10 @@ class PTSampler(object):
 
     def writeOutput(self, iter):
         """
-        Write chains and covariance matrix.  Called every isave on samples or at end.
+        Write chains and covariance matrix. Called every isave on samples or at end.
+
+        @param iter: Iteration of sampler
+
         """
         if iter // self.thin >= self.ind_next_write:
 
@@ -722,114 +678,54 @@ class PTSampler(object):
         nameChainTemps=False,
     ):
         """
-        Run the PTMCMC sampler. This function performs Parallel Tempering Markov Chain Monte Carlo sampling. Depending on configuration, the sampler operates in one of two modes:
-        1. Standard Parallel Tempering (default)
-        2. Varying-beta / power-posterior sampling (when ``beta_schedule`` is provided)
-        
-        Parameters
-        ----------
-        p0: array_like
-            Initial parameter vector
-        
-        Niter: int
-            Number of iterations for the cold chain in standard PTMCMC runs. Ignored when ``beta_schedule`` is provided, because the schedule length determines the run length
-        
-        Bmax: float, optional
-            Maximum beta value (default = 1)
-        
-        Bmin: float, optional
-            Minimum beta value in the ladder
-        
-        ladder: array_like, optional
-            User-specified beta or temperature ladder. If temperatures are supplied, they will automatically be converted to betas
-        
-        shape: {"geometric", "linear"}, optional
-            Shape of the automatically generated temperature/beta ladder when ``ladder`` is not provided. Ignored if ``ladder`` or ``beta_schedule`` is supplied
-        
-        Tmin: float, optional
-            Minimum temperature used to construct the ladder
-        
-        Tmax: float, optional
-            Maximum temperature used to construct the ladder
-        
-        Tskip: int, optional
-            Number of iterations between proposed temperature swaps
-        
-        isave: int, optional
-            Number of iterations between writing samples to disk
-        
-        covUpdate: int, optional
-            Number of iterations between adaptive covariance updates
-        
-        SCAMweight: int, optional
-            Weight of the SCAM jump proposal in the proposal cycle
-        
-        AMweight: int, optional
-            Weight of the Adaptive Metropolis jump proposal
-        
-        DEweight: int, optional
-            Weight of the Differential Evolution jump proposal
-        
-        NUTSweight: int, optional
-            Weight of the No-U-Turn Sampler proposal
-        
-        MALAweight: int, optional
-            Weight of the MALA proposal
-        
-        HMCweight: int, optional
-            Weight of the Hamiltonian Monte Carlo proposal
-        
-        burn: int, optional
-            Burn-in period before Differential Evolution jumps are enabled
-        
-        HMCstepsize: float, optional
-            Step size used in Hamiltonian Monte Carlo proposals
-        
-        HMCsteps: int, optional
-            Maximum number of leapfrog steps used in HMC trajectories
-        
-        maxIter: int, optional
-            Maximum number of iterations allowed for high-temperature chains. Defaults to ``Niter`` when not supplied
-        
-        thin: int, optional
-            Thinning interval for recorded samples
-        
-        i0: int, optional
-            Initial iteration index. Used when resuming a previous run
-        
-        neff: int, optional
-            Target number of effective samples before stopping early
-        
-        writeHotChains: bool, optional
-            If True, write hot chains to disk
-        
-        hotChain: bool, optional
-            If True, include a beta = 0 chain
-        
-        beta_schedule: array_like, optional
-            Sequence of inverse temperatures (betas), interpreted as one beta value per sampler state. When provided, the sampler runs in varying-beta mode rather than standard parallel tempering
-        
-            This is typically used for thermodynamic integration or power-posterior sampling, where the likelihood contribution is gradually introduced by increasing beta from 0 to 1
-        
-            Values must lie in the interval [0, 1]
-        
-            When ``beta_schedule`` is used:
-                - Parallel tempering swaps are disabled
-                - Only single-chain runs are supported
-                - ``ladder`` and ``hotChain`` options cannot be used
-                - If ``hold_iter`` is used, a beta = 0 plateau is prepended
-                - The number of transition steps is ``len(full_schedule) - 1``
-        
-        hold_iter: int, optional
-            Number of initial schedule states to hold beta = 0 before following the provided ``beta_schedule``. This prepends a plateau of beta = 0 values to the schedule
-            
-        nameChainTemps: bool, optional
-            If True, chain files are named using temperatures instead of betas
-        
-        Notes
-        -----
-        If ``beta_schedule`` is supplied, the sampler performs a varying-beta run where the inverse temperature changes deterministically by schedule state rather than using a parallel tempering ladder
-        """       
+        Function to carry out PTMCMC sampling.
+
+        @param p0: Initial parameter vector
+        @param Niter: Number of iterations to use for T = 1 chain. If
+        beta_schedule is supplied, the schedule length determines the run length.
+        @param Bmax: Maximum beta in ladder (default=1)
+        @param Bmin: Minimum beta in ladder (default=None)
+        @param shape: Specifies shape of beta/temperature ladder if a ladder is
+        not already given (default='geometric')
+        @param ladder: User defined temperature/beta ladder. Either scheme accepted
+        @param Tmin: Minimum temperature in ladder (default=None)
+        @param Tmax: Maximum temperature in ladder (default=None)
+        @param Tskip: Number of steps between proposed temperature swaps
+        (default=100)
+        @param isave: Write to file every isave samples (default=1000)
+        @param covUpdate: Number of iterations between AM covariance updates
+        (default=1000)
+        @param SCAMweight: Weight of SCAM jumps in overall jump cycle
+        (default=20)
+        @param AMweight: Weight of AM jumps in overall jump cycle (default=20)
+        @param DEweight: Weight of DE jumps in overall jump cycle (default=20)
+        @param NUTSweight: Weight of the NUTS jumps in jump cycle (default=20)
+        @param MALAweight: Weight of the MALA jumps in jump cycle (default=20)
+        @param HMCweight: Weight of the HMC jumps in jump cycle (default=20)
+        @param HMCstepsize: Step-size of the HMC jumps (default=0.1)
+        @param HMCsteps: Maximum number of steps in an HMC trajectory
+        (default=300)
+        @param burn: Burn in time (DE jumps added after this iteration)
+        (default=10000)
+        @param maxIter: Maximum number of iterations for high temperature chains
+        (default=Niter)
+        @param thin: MCMC samples are recorded every thin samples
+        @param i0: Iteration to start MCMC (if i0 != 0, do not re-initialize)
+        @param neff: Number of effective samples to collect before terminating
+        @param writeHotChains: If True, write hot chains to disk
+        @param hotChain: If True, include a beta=0 hot chain
+        @param beta_schedule: Optional sequence of inverse temperatures/betas,
+        interpreted as one beta value per sampler state. If supplied, the sampler
+        performs a varying-beta run rather than standard parallel tempering.
+        Parallel tempering swaps are disabled, only single-chain runs are
+        supported, ladder and hotChain cannot be used, and the number of
+        transition steps is len(full_schedule)-1.
+        @param hold_iter: Number of initial beta=0 schedule states to prepend
+        before following beta_schedule.
+        @param nameChainTemps: Reverts to temperature naming convention of
+        chains (default=False)
+
+        """
 
         # set up arrays to store lnprob, lnlike and chain
         # if picking up from previous run, don't re-initialize
@@ -1043,35 +939,21 @@ class PTSampler(object):
         lnprob2=None,
     ):
         """
-        Perform a single PTMCMC iteration
-        
-        Parameters
-        ----------
-        p0: ndarray
-            Current parameter vector
-        
-        lnlike0: float
-            Current log-likelihood value
-        
-        lnprob0: float
-            Current log-posterior value
-        
-        iter: int
-            Current iteration index
-        
-        lnlike1, lnprob1, lnlike2, lnprob2 : float, optional
-            Model-switch likelihood and posterior values when model-switching mode is enabled
-        
-        Returns
-        -------
-        p0: ndarray
-            Updated parameter vector
-        
-        lnlike0: float
-            Updated log-likelihood value
-        
-        lnprob0: float
-            Updated log-posterior value
+        Function to carry out one PTMCMC sampling step
+
+        @param p0: Initial parameter vector
+        @param lnlike0: Initial log-likelihood value
+        @param lnprob0: Initial log probability value
+        @param iter: Iteration number
+        @param lnlike1: Model 1 log-likelihood value, if using model-switching
+        @param lnprob1: Model 1 log posterior value, if using model-switching
+        @param lnlike2: Model 2 log-likelihood value, if using model-switching
+        @param lnprob2: Model 2 log posterior value, if using model-switching
+
+        @return p0: next value of parameter vector after one MCMC step
+        @return lnlike0: next value of likelihood after one MCMC step
+        @return lnprob0: next value of posterior after one MCMC step
+
         """
         # update covariance matrix
         if (iter - 1) % self.covUpdate == 0 and (iter - 1) != 0 and self.MPIrank == 0:
@@ -1229,8 +1111,31 @@ class PTSampler(object):
 
     def PTswap(self, p0, lnlike0, lnprob0, iter):
         """
-        Parallel tempering swap using betas.
-        Assumes self.ladder is an array of betas (ladder[0] ~ 1, decreasing).
+        Do parallel tempering swap using betas. This feature is not used for
+        model-switching or scheduled-beta runs
+
+        (Repurposed from Neil Cornish/Bence Becsy's code)
+
+        Assumes self.ladder is an array of inverse temperatures/betas, with
+        ladder[0] corresponding to the cold chain and subsequent entries
+        corresponding to hotter chains
+
+        Swap acceptance rates are computed per chain by storing the number of
+        swaps proposed and accepted. Since PTswap is called for all chains at a
+        swap attempt, swapProposed is incremented when PTswap is called.
+        nswap_accepted is incremented only by the accepted-swap indicator
+        scattered back to that chain. The swap acceptance is calculated
+        elsewhere
+
+        @param p0: current parameter vector
+        @param lnlike0: current log-likelihood
+        @param lnprob0: current log posterior value
+        @param iter: current iteration number
+
+        @return p0: new parameter vector
+        @return lnlike0: new log-likelihood
+        @return lnprob0: new log posterior value
+
         """
 
         betas = np.asarray(self.ladder, dtype=float)  # betas per chain index
@@ -1333,16 +1238,16 @@ class PTSampler(object):
 
     def _writeToFile(self, iter):
         """
-        Write sampler output to the chain file
-        
-        Each row written contains the parameter vector followed by diagnostic quantities including the log-posterior, log-likelihood, acceptance rate, and parallel-tempering acceptance rate
-        
-        In model-switching mode, additional columns are written for the log-posterior and log-likelihood of each model
-        
-        Parameters
-        ----------
-        iter: int
-            Current iteration number
+        Function to write chain file. In standard PTMCMC mode, file has
+        ndim+4 columns: parameter values, log-posterior, log-likelihood,
+        acceptance rate, and PT acceptance rate. In scheduled-beta mode,
+        a leading beta column is written before the parameter values.
+        If doing model-switching there are an additional 4 columns:
+        log-posterior of model 1, log-likelihood of model 1,
+        log-posterior of model 2, and log-likelihood of model 2.
+        Rates are as of time of writing.
+
+        @param iter: Iteration of sampler
 
         """
 
@@ -1410,15 +1315,11 @@ class PTSampler(object):
     # function to update covariance matrix for jump proposals
     def _updateRecursive(self, iter, mem):
         """
-        Recursively update the adaptive covariance matrix used for proposal jumps
-        
-        Parameters
-        ----------
-        iter: int
-            Current iteration index
-        
-        mem: int
-            Number of samples used in the covariance update window
+        Function to recursively update sample covariance matrix.
+
+        @param iter: Iteration of sampler
+        @param mem: Number of steps between updates
+
         """
         it = iter - mem
         ndim = self.ndim
@@ -1451,17 +1352,11 @@ class PTSampler(object):
     # update DE buffer samples
     def _updateDEbuffer(self, iter, burn):
         """
-        Update the Differential Evolution proposal buffer
-        
-        The DE buffer stores recent chain samples used to construct differential evolution proposal jumps
-        
-        Parameters
-        ----------
-        iter: int
-            Current iteration index
-        
-        burn: int
-            Size of the DE buffer window
+        Update Differential Evolution with last burn values in the total chain
+
+        @param iter: Iteration of sampler
+        @param burn: Total number of samples in DE buffer
+
         """
 
         self._DEbuffer = shift_array(self._DEbuffer, -len(self._AMbuffer))  # shift DEbuffer to the left
@@ -1470,28 +1365,17 @@ class PTSampler(object):
     # SCAM jump
     def covarianceJumpProposalSCAM(self, x, iter, beta):
         """
-        Single Component Adaptive Metropolis (SCAM) proposal
-        
-        Randomly selects a parameter group and proposes a jump using the adaptive covariance structure of that group
-        
-        Parameters
-        ----------
-        x: ndarray
-            Current parameter vector
-        
-        iter: int
-            Current iteration number
-        
-        beta: float
-            Inverse temperature of the chain
-        
-        Returns
-        -------
-        q: ndarray
-            Proposed parameter vector
-        
-        qxy: float
-            Log Hastings ratio contribution
+        Single Component Adaptive Jump Proposal. This function will occasionally
+        jump in more than 1 parameter. It will also occasionally use different
+        jump sizes to ensure proper mixing.
+
+        @param x: Parameter vector at current position
+        @param iter: Iteration of sampler
+        @param beta: Inverse temperature of chain
+
+        @return q: New position in parameter space
+        @return qxy: Forward-Backward jump probability
+
         """
 
         q = x.copy()
@@ -1541,28 +1425,16 @@ class PTSampler(object):
     # AM jump
     def covarianceJumpProposalAM(self, x, iter, beta):
         """
-        Adaptive Metropolis (AM) proposal
-        
-        Uses the adaptive covariance estimate of the selected parameter group to generate a correlated proposal
-        
-        Parameters
-        ----------
-        x: ndarray
-            Current parameter vector
-        
-        iter: int
-            Current iteration number
-        
-        beta: float
-            Inverse temperature of the chain
-        
-        Returns
-        -------
-        q: ndarray
-            Proposed parameter vector
-        
-        qxy: float
-            Log Hastings ratio contribution
+        Adaptive Jump Proposal. This function will occasionally
+        use different jump sizes to ensure proper mixing
+
+        @param x: Parameter vector at current position
+        @param iter: Iteration of sampler
+        @param beta: Inverse temperature of chain
+
+        @return q: New position in parameter space
+        @return qxy: Forward-Backward jump probability
+
         """
 
         q = x.copy()
@@ -1610,30 +1482,17 @@ class PTSampler(object):
     # Differential evolution jump
     def DEJump(self, x, iter, beta):
         """
-        Differential Evolution (DE) proposal
-        
-        Generates a proposal using the difference between two samples drawn from the DE buffer
-        
-        Parameters
-        ----------
-        x: ndarray
-            Current parameter vector
-        
-        iter: int
-            Current iteration number
-        
-        beta: float
-            Inverse temperature of the chain
-        
-        Returns
-        -------
-        q: ndarray
-            Proposed parameter vector
-        
-        qxy: float
-            Log Hastings ratio contribution
-        """
+        Differential Evolution Jump. This function will occasionally
+        use different jump sizes to ensure proper mixing
 
+        @param x: Parameter vector at current position
+        @param iter: Iteration of sampler
+        @param beta: Inverse temperature of chain
+
+        @return q: New position in parameter space
+        @return qxy: Forward-Backward jump probability
+
+        """
         # get old parameters
         q = x.copy()
         qxy = 0
@@ -1677,15 +1536,11 @@ class PTSampler(object):
     # add jump proposal distribution functions
     def addProposalToCycle(self, func, weight):
         """
-        Add a proposal distribution to the sampler proposal cycle
+        Add jump proposal distributions to cycle with a given weight
 
-        Parameters
-        ----------
-        func: callable
-            Proposal function to add
-        
-        weight: int
-            Relative weight of the proposal in the proposal cycle
+        @param func: jump proposal function
+        @param weight: jump proposal function weight in cycle
+
         """
 
         # get length of cycle so far
@@ -1710,14 +1565,12 @@ class PTSampler(object):
     # add auxilary jump proposal distribution functions
     def addAuxilaryJump(self, func):
         """
-        Register an auxiliary jump proposal
-        
-        Auxiliary jumps are applied after each standard proposal. Examples include cyclic boundary corrections or parameter transformations
-        
-        Parameters
-        ----------
-        func: callable
-            Auxiliary proposal function
+        Add auxilary jump proposal distribution. This will be called after every
+        standard jump proposal. Examples include cyclic boundary conditions and
+        pulsar phase fixes.
+
+        @param func: jump proposal function
+
         """
 
         # set auxilary jump
@@ -1743,7 +1596,14 @@ class PTSampler(object):
     # call proposal functions from cycle
     def _jump(self, x, iter):
         """
-        Randomly select and execute a proposal from the proposal cycle. Returns the proposed state, Hastings ratio contribution, and the name of the proposal used
+        Call Jump proposals.
+
+        @param x: Parameter vector at current position
+        @param iter: Iteration of sampler
+
+        @return q: New position in parameter space
+        @return qxy: Forward-Backward jump probability
+        @return jump_name: Name of proposal used
 
         """
 
