@@ -379,7 +379,7 @@ class PTSampler(object):
                 percent = 100.0 * n_used / n_total
             
                 warnings.warn(
-                    f"[beta_schedule] thin={thin} ’ using {percent:.1f}% "
+                    f"[beta_schedule] thin={thin} Â’ using {percent:.1f}% "
                     f"of beta grid ({n_used}/{n_total} points retained)",
                     RuntimeWarning
                 )
@@ -1302,7 +1302,7 @@ class PTSampler(object):
 
             # beta column only for varying-beta runs
             if self.write_beta_col:
-                self._chainfile.write("%f\t" % self._beta[ind])
+                self._chainfile.write("%22.22f\t" % self._beta[ind])
 
             # then parameters (always)
             self._chainfile.write(
