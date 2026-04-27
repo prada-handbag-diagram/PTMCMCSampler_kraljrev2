@@ -135,7 +135,7 @@ class PTSampler(object):
 
         self.ndim = ndim
 
-        # Infer model-switching from the *type* of logl/logp (no user-facing flag)
+        # Infer model-switch mode from tuple-valued logl/logp instead of passing a separate MSTI flag
         logl_is_tuple = isinstance(logl, tuple)
         logp_is_tuple = isinstance(logp, tuple)
 
@@ -155,7 +155,7 @@ class PTSampler(object):
                     "For model-switching, logl and logp must be tuples of length 2."
                 )
 
-            # Keep your existing mapping (your code treats index 1 as model 1)
+            # Preserve the previous model ordering: tuple index 1 is model 1 and index 0 is model 2
             self.logl1 = _function_wrapper(logl[1], loglargs, loglkwargs)
             self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs)
             self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs)
@@ -331,7 +331,7 @@ class PTSampler(object):
         * The number of iterations is determined by the schedule length
         """
 
-        # Varying-beta schedule (power posterior / thermodynamic integration mode)
+        # Scheduled beta mode replaces the old beta_step-on-acceptance logic with an explicit beta value for each schedule state
         self.beta_schedule = None
         self.disable_pt = False
         scheduling_active = beta_schedule is not None
@@ -339,6 +339,7 @@ class PTSampler(object):
         if hold_iter < 0:
             raise ValueError("hold_iter must be >= 0")
 
+        # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
         if scheduling_active:
             if hotChain:
                 raise ValueError("hotChain is not compatible with beta_schedule runs")
@@ -357,6 +358,7 @@ class PTSampler(object):
             # Parse beta_schedule as array-like custom schedule
             beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
                 
+            # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
             hold = np.zeros(int(hold_iter), dtype=float)
             full = np.concatenate([hold, beta_core])
     
@@ -378,12 +380,12 @@ class PTSampler(object):
                 percent = 100.0 * n_used / n_total
             
                 warnings.warn(
-                    f"[beta_schedule] thin={thin}  using {percent:.1f}% "
+                    f"[beta_schedule] thin={thin} -> using {percent:.1f}% "
                     f"of beta grid ({n_used}/{n_total} points retained)",
                     RuntimeWarning
                 )
     
-            # Override Niter/maxIter based on schedule, full.size is the number of beta values for stored states, including the initial state, so the number of transition steps is one less. 
+            # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1 
             Niter = int(full.size) - 1
             if Niter < 0:
                 raise ValueError("beta_schedule must contain at least one value")
@@ -416,7 +418,7 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Output/resume format flag (preserve legacy format unless feature is active)
+        # Only scheduled-beta chains add a leading beta column, legacy PT output keeps its old layout
         self.write_beta_col = (self.beta_schedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
@@ -603,10 +605,12 @@ class PTSampler(object):
         if iter % self.thin == 0:
             ind = int(iter / self.thin)
             self._chain[ind, :] = p0
+            # Save the beta actually used for this sample so scheduled beta output and resume agree
             self._beta[ind] = self.beta
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
 
+            # Use None checks rather than truthiness so zero valued log probabilities are still stored
             if (lnlike1 is not None) and (lnlike2 is not None) and (lnprob1 is not None) and (lnprob2 is not None):
                 self._lnlike1[ind] = lnlike1
                 self._lnprob1[ind] = lnprob1
@@ -619,7 +623,10 @@ class PTSampler(object):
 
     def writeOutput(self, iter):
         """
-        Write chains and covariance matrix.  Called every isave on samples or at end.
+        Write chains and covariance matrix. Called every isave on samples or at end.
+
+        @param iter: Iteration of sampler
+
         """
         if iter // self.thin >= self.ind_next_write:
 
@@ -836,7 +843,7 @@ class PTSampler(object):
             if self.write_beta_col:
                 self.beta = self.resumechain[last_row, 0]
             else:
-                # legacy format  beta comes from ladder
+                # Legacy format: beta comes from the ladder
                 self.beta = self.ladder[self.MPIrank]
 
             p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
@@ -891,7 +898,8 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
-        # If beta_schedule is active, make the current state consistent with the schedule
+        # Scheduled-beta runs change the target distribution each iteration
+        # so update beta and recompute lnprob0 before proposing the next move
         if getattr(self, "beta_schedule", None) is not None:
             current_idx = i0
             if current_idx < 0 or current_idx >= len(self.beta_schedule):
@@ -1065,7 +1073,7 @@ class PTSampler(object):
             # randomize cycle
             self.randomizeProposalCycle()
         
-        # Recompute lnprob0 under current beta
+        # Scheduled beta runs change targets by state, so update beta before proposing
         if getattr(self, "beta_schedule", None) is not None:
             idx = iter
             if idx < 0 or idx >= len(self.beta_schedule):
@@ -1104,9 +1112,11 @@ class PTSampler(object):
 
         elif self.modelswitch:  # Using modelswitch
 
+            # Model-switch mode now evaluates both models on the same parameter vector, the old per-model slicing path is gone
             lp1 = self.logp1(y)
             lp2 = self.logp2(y)
 
+            # Set all model specific log values on invalid proposals so rejected jumps do not leave undefined variables
             if lp1 == -np.inf or lp2 == -np.inf:
                 newlnlike = -np.inf
                 newlnprob = -np.inf
@@ -1221,7 +1231,9 @@ class PTSampler(object):
         p0 = self.comm.scatter(new_p0s if self.MPIrank == 0 else None, root=0)
         lnlike0 = self.comm.scatter(new_log_Ls if self.MPIrank == 0 else None, root=0)
 
-        # Track acceptance stats
+        # Track acceptance stats for this chain. Each PTswap call counts as
+        # one swap proposal opportunity for the chain; nswap_accepted is
+        # incremented by the accepted-swap indicator scattered from rank 0
         self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
         self.swapProposed += 1
 
