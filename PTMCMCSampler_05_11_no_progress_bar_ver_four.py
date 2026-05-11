@@ -984,7 +984,7 @@ class PTSampler(object):
                 newlnlike = self.logl(y)
                 newlnprob = self.beta * newlnlike + lp
 
-        else:  # Using modelswitch
+        else: 
 
             # Model-switch mode evaluates both models on the same parameter vector
             lp1 = self.logp1(y)
