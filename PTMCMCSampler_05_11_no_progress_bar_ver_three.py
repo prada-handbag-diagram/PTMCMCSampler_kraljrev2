@@ -762,7 +762,7 @@ class PTSampler(object):
                     lnlike0 = self.logl(p0)
                     lnprob0 = self.beta * lnlike0 + lp
 
-            elif self.modelswitch:  # Using modelswitch
+            else:
                 
                 lp1 = self.logp1(p0)
                 lp2 = self.logp2(p0)
@@ -813,7 +813,7 @@ class PTSampler(object):
             # record first values
             self.updateChains(p0, lnlike0, lnprob0, i0)
 
-        elif self.modelswitch:  # Using modelswitch
+        else:  
             # record first values
             self.updateChains(
                 p0,
@@ -839,7 +839,7 @@ class PTSampler(object):
             # call PTMCMCOneStep
             if not self.modelswitch:
                 p0, lnlike0, lnprob0 = self.PTMCMCOneStep(p0, lnlike0, lnprob0, iter)
-            elif self.modelswitch:
+            else:
                 p0, lnlike0, lnprob0, lnlike1, lnprob1, lnlike2, lnprob2 = self.PTMCMCOneStep(
                     p0,
                     lnlike0,
@@ -984,7 +984,7 @@ class PTSampler(object):
                 newlnlike = self.logl(y)
                 newlnprob = self.beta * newlnlike + lp
 
-        elif self.modelswitch:  # Using modelswitch
+        else:  # Using modelswitch
 
             # Model-switch mode evaluates both models on the same parameter vector
             lp1 = self.logp1(y)
