@@ -722,7 +722,7 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps
             )
 
-        # compute lnprob for initial point in chain... if resuming, start from the LAST saved point in the chain
+        # Compute the initial log probability. When resuming, continue from the last saved sample
         if self.resume and self.resumeLength > 0:
 
             last_row = self.resumeLength - 1
@@ -784,7 +784,7 @@ class PTSampler(object):
 
                     lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
 
-                    lnprob0 = self.beta * (lnlike0) + lnprob2  #
+                    lnprob0 = self.beta * (lnlike0) + lnprob2  
 
         # Scheduled-beta runs change the target distribution each iteration
         # so update beta and recompute lnprob0 before proposing the next move
