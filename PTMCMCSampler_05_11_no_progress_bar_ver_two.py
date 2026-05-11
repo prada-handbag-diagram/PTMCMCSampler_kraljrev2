@@ -273,7 +273,6 @@ class PTSampler(object):
         """
         # Scheduled-beta mode uses an explicit beta value for each sampler state
         self.beta_schedule = None
-        self.disable_pt = False
         scheduling_active = beta_schedule is not None
 
         if hold_iter < 0:
@@ -293,11 +292,12 @@ class PTSampler(object):
                     "Run without MPI or use a single MPI process."
                 )
     
-            self.disable_pt = True
-    
-            # Parse beta_schedule as array-like custom schedule
-            beta_core = np.asarray(beta_schedule, dtype=float).reshape(-1)
-                
+            # Parse beta_schedule as a one-dimensional array of beta values
+            beta_core = np.asarray(beta_schedule, dtype=float)
+            
+            if beta_core.ndim != 1:
+                raise ValueError("beta_schedule must be a one-dimensional sequence of beta values")
+                        
             # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
             hold = np.zeros(int(hold_iter), dtype=float)
             full = np.concatenate([hold, beta_core])
@@ -327,8 +327,6 @@ class PTSampler(object):
     
             # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1 
             Niter = int(full.size) - 1
-            if Niter < 0:
-                raise ValueError("beta_schedule must contain at least one value")
             if maxIter is None:
                 maxIter = Niter
 
@@ -466,15 +464,15 @@ class PTSampler(object):
         else:
             if hotChain and self.MPIrank == self.nchain - 1:
                 self.beta = 0  # This is the "hot chain"
-                if nameChainTemps:  # if you prefer the old naming scheme
+                if nameChainTemps:  # name chains by temperature
                     self.fname = self.outDir + "/chain_hot.txt"
-                else:  # new naming scheme with beta
+                else:  # name chains by beta
                     self.fname = self.outDir + "/chain_0.txt"
 
-            elif nameChainTemps:  # if you prefer the old naming scheme
+            elif nameChainTemps:  # name chains by temperature
                 self.fname = self.outDir + "/chain_{0}.txt".format(1 / self.beta)
 
-            else:  # new naming scheme with beta
+            else:  # name chains by beta
                 self.fname = self.outDir + "/chain_{0}.txt".format(self.beta)
 
         # write hot chains
@@ -790,7 +788,7 @@ class PTSampler(object):
 
         # Scheduled-beta runs change the target distribution each iteration
         # so update beta and recompute lnprob0 before proposing the next move
-        if getattr(self, "beta_schedule", None) is not None:
+        if self.beta_schedule is not None:
             current_idx = i0
             if current_idx < 0 or current_idx >= len(self.beta_schedule):
                 raise IndexError(
@@ -950,7 +948,7 @@ class PTSampler(object):
             self.randomizeProposalCycle()
         
         # Scheduled beta runs change targets by state, so update beta before proposing
-        if getattr(self, "beta_schedule", None) is not None:
+        if self.beta_schedule is not None:
             idx = iter
             if idx < 0 or idx >= len(self.beta_schedule):
                 raise IndexError(
@@ -1052,7 +1050,7 @@ class PTSampler(object):
 
         else:
             # temperature swap
-            if (not getattr(self, "disable_pt", False)) and (iter % self.Tskip == 0) and (self.nchain > 1):
+            if iter % self.Tskip == 0 and self.nchain > 1:
                 p0, lnlike0, lnprob0 = self.PTswap(p0, lnlike0, lnprob0, iter)
 
             self.updateChains(p0, lnlike0, lnprob0, iter)
@@ -1447,16 +1445,6 @@ class PTSampler(object):
         # make sure mm and nn are not the same iteration
         while mm == nn:
             nn = self.stream.integers(0, bufsize)
-
-        # get jump scale size
-        # prob = self.stream.random()
-
-        # mode jump
-        # if prob > 0.5:
-        #     scale = 1.0
-
-        # else:
-        #     scale = self.stream.random() * 2.4 / np.sqrt(2 * ndim) * np.sqrt(1 / self.beta)
 
         scale = 1.0
 
