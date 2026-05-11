@@ -782,7 +782,7 @@ class PTSampler(object):
                     lnlike2 = self.logl2(p0)
                     lnprob2 = lnlike2 + lp2
 
-                    lnlike0 = lnprob1 - lnprob2  # Not power posteriors
+                    lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  #
 
@@ -986,7 +986,6 @@ class PTSampler(object):
 
         else: 
 
-            # Model-switch mode evaluates both models on the same parameter vector
             lp1 = self.logp1(y)
             lp2 = self.logp2(y)
 
