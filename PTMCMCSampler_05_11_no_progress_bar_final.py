@@ -115,7 +115,7 @@ class PTSampler(object):
 
         self.ndim = ndim
 
-        # Infer model-switch mode from tuple-valued logl/logp instead of passing a separate MSTI flag
+        # Model-switch mode is invoked when logl and logp are both tuples
         logl_is_tuple = isinstance(logl, tuple)
         logp_is_tuple = isinstance(logp, tuple)
 
@@ -135,7 +135,7 @@ class PTSampler(object):
                     "For model-switching, logl and logp must be tuples of length 2."
                 )
 
-            # Preserve the previous model ordering: tuple index 1 is model 1 and index 0 is model 2
+            # Tuple index 1 is treated as model 1, and tuple index 0 is treated as model 2
             self.logl1 = _function_wrapper(logl[1], loglargs, loglkwargs)
             self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs)
             self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs)
@@ -271,7 +271,7 @@ class PTSampler(object):
         chains (default=False)
 
         """
-        # Scheduled beta mode replaces the old beta_step-on-acceptance logic with an explicit beta value for each schedule state
+        # Scheduled-beta mode uses an explicit beta value for each sampler state
         self.beta_schedule = None
         self.disable_pt = False
         scheduling_active = beta_schedule is not None
@@ -358,7 +358,7 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Only scheduled-beta chains add a leading beta column, legacy PT output keeps its old layout
+        # Scheduled-beta chains add a leading beta column; standard PT output keeps the usual layout
         self.write_beta_col = (self.beta_schedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
@@ -733,7 +733,7 @@ class PTSampler(object):
             if self.write_beta_col:
                 self.beta = self.resumechain[last_row, 0]
             else:
-                # Legacy format: beta comes from the ladder
+                # Standard PT output does not store beta, so beta comes from the ladder
                 self.beta = self.ladder[self.MPIrank]
 
             p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
@@ -988,7 +988,7 @@ class PTSampler(object):
 
         elif self.modelswitch:  # Using modelswitch
 
-            # Model-switch mode now evaluates both models on the same parameter vector, the old per-model slicing path is gone
+            # Model-switch mode evaluates both models on the same parameter vector
             lp1 = self.logp1(y)
             lp2 = self.logp2(y)
 
@@ -1346,9 +1346,6 @@ class PTSampler(object):
         else:
             scale = 1.0
 
-        # adjust scale based on beta
-        # if self.beta >= 0.01:
-        #     scale *= 1/np.sqrt(self.beta)
 
         # get parmeters in new diagonalized basis
         # y = np.dot(self.U.T, x[self.covinds])
@@ -1404,9 +1401,6 @@ class PTSampler(object):
         else:
             scale = 1.0
 
-        # adjust scale based on beta
-        # if self.beta >= 0.01:
-        #     scale *= 1/np.sqrt(self.beta)
 
         # get parmeters in new diagonalized basis
         y = np.dot(self.U[jumpind].T, x[self.groups[jumpind]])
