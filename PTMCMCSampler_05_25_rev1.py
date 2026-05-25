@@ -219,16 +219,16 @@ class PTSampler(object):
         neff=None,
         writeHotChains=False,
         hotChain=False,
-        beta_schedule=None,
-        hold_iter=0,
+        betaSchedule=None,
+        holdIter=0,
         nameChainTemps=False
     ):
         """
         Initialize MCMC quantities
 
         @param Niter: Number of iterations to use for T = 1 chain. If
-        beta_schedule is supplied, this is replaced by len(beta_schedule)-1
-        after any hold_iter plateau is prepended.
+        betaSchedule is supplied, this is replaced by len(betaSchedule)-1
+        after any holdIter plateau is prepended.
         @param Bmax: Maximum beta in ladder (default=1)
         @param Bmin: Minimum beta in ladder (default=None)
         @param ladder: User defined temperature/beta ladder. Either scheme accepted.
@@ -260,56 +260,56 @@ class PTSampler(object):
         @param neff: Number of effective samples to collect before terminating
         @param writeHotChains: If True, write hot chains to disk
         @param hotChain: If True, include a beta=0 hot chain
-        @param beta_schedule: Optional sequence of inverse temperatures/betas,
+        @param betaSchedule: Optional sequence of inverse temperatures/betas,
         interpreted as one beta value per sampler state. If supplied, the run
         uses a single chain with beta changing deterministically by schedule
         state, parallel tempering is disabled, and ladder/hotChain are not used.
         Values must lie in [0, 1].
-        @param hold_iter: Number of initial beta=0 schedule states to prepend
-        before following beta_schedule.
+        @param holdIter: Number of initial beta=0 schedule states to prepend
+        before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
         chains (default=False)
 
         """
         # Scheduled-beta mode uses an explicit beta value for each sampler state
-        self.beta_schedule = None
-        scheduling_active = beta_schedule is not None
+        self.betaSchedule = None
+        scheduling_active = betaSchedule is not None
 
-        if hold_iter < 0:
-            raise ValueError("hold_iter must be >= 0")
+        if holdIter < 0:
+            raise ValueError("holdIter must be >= 0")
 
         # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
         if scheduling_active:
             if hotChain:
-                raise ValueError("hotChain is not compatible with beta_schedule runs")
+                raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
                 raise ValueError(
-                    f"beta_schedule is not compatible with ladder={ladder}. Omit ladder for beta_schedule runs."
+                    f"betaSchedule is not compatible with ladder={ladder}. Omit ladder for betaSchedule runs."
                 )
             if self.nchain > 1:
                 raise ValueError(
-                    f"beta_schedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
+                    f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
                     "Run without MPI or use a single MPI process."
                 )
     
-            # Parse beta_schedule as a one-dimensional array of beta values
-            beta_core = np.asarray(beta_schedule, dtype=float)
+            # Parse betaSchedule as a one-dimensional array of beta values
+            beta_core = np.asarray(betaSchedule, dtype=float)
             
             if beta_core.ndim != 1:
-                raise ValueError("beta_schedule must be a one-dimensional sequence of beta values")
+                raise ValueError("betaSchedule must be a one-dimensional sequence of beta values")
                         
             # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
-            hold = np.zeros(int(hold_iter), dtype=float)
+            hold = np.zeros(int(holdIter), dtype=float)
             full = np.concatenate([hold, beta_core])
     
             if full.ndim != 1 or full.size == 0:
-                raise ValueError("beta_schedule produced an empty schedule")
+                raise ValueError("betaSchedule produced an empty schedule")
             if not np.all(np.isfinite(full)):
-                raise ValueError("beta_schedule contains non-finite values")
+                raise ValueError("betaSchedule contains non-finite values")
             if np.min(full) < 0.0 or np.max(full) > 1.0:
-                raise ValueError("beta_schedule values must lie in [0, 1]")
+                raise ValueError("betaSchedule values must lie in [0, 1]")
     
-            self.beta_schedule = full
+            self.betaSchedule = full
             self.beta = float(full[0])
 
             # Warn if thinning skips beta schedule points
@@ -320,7 +320,7 @@ class PTSampler(object):
                 percent = 100.0 * n_used / n_total
             
                 warnings.warn(
-                    f"[beta_schedule] thin={thin} -> using {percent:.1f}% "
+                    f"[betaSchedule] thin={thin} -> using {percent:.1f}% "
                     f"of beta grid ({n_used}/{n_total} points retained)",
                     RuntimeWarning
                 )
@@ -357,7 +357,7 @@ class PTSampler(object):
         self.tstart = 0
             
         # Scheduled-beta chains add a leading beta column; standard PT output keeps the usual layout
-        self.write_beta_col = (self.beta_schedule is not None)
+        self.write_beta_col = (self.betaSchedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
@@ -486,7 +486,7 @@ class PTSampler(object):
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
                 expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
-                    current_mode = "beta_schedule=True" if self.write_beta_col else "beta_schedule=False"
+                    current_mode = "betaSchedule=True" if self.write_beta_col else "betaSchedule=False"
                     raise Exception(
                         f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
                         f"but found {self.resumechain.shape[1]}. "
@@ -634,8 +634,8 @@ class PTSampler(object):
         neff=None,
         writeHotChains=False,
         hotChain=False,
-        beta_schedule=None,
-        hold_iter=0,
+        betaSchedule=None,
+        holdIter=0,
         nameChainTemps=False,
     ):
         """
@@ -643,7 +643,7 @@ class PTSampler(object):
 
         @param p0: Initial parameter vector
         @param Niter: Number of iterations to use for T = 1 chain. If
-        beta_schedule is supplied, the schedule length determines the run length.
+        betaSchedule is supplied, the schedule length determines the run length.
         @param Bmax: Maximum beta in ladder (default=1)
         @param Bmin: Minimum beta in ladder (default=None)
         @param shape: Specifies shape of beta/temperature ladder if a ladder is
@@ -675,14 +675,14 @@ class PTSampler(object):
         @param neff: Number of effective samples to collect before terminating
         @param writeHotChains: If True, write hot chains to disk
         @param hotChain: If True, include a beta=0 hot chain
-        @param beta_schedule: Optional sequence of inverse temperatures/betas,
+        @param betaSchedule: Optional sequence of inverse temperatures/betas,
         interpreted as one beta value per sampler state. If supplied, the sampler
         performs a varying-beta run rather than standard parallel tempering.
         Parallel tempering swaps are disabled, only single-chain runs are
         supported, ladder and hotChain cannot be used, and the number of
         transition steps is len(full_schedule)-1.
-        @param hold_iter: Number of initial beta=0 schedule states to prepend
-        before following beta_schedule.
+        @param holdIter: Number of initial beta=0 schedule states to prepend
+        before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
         chains (default=False)
 
@@ -716,8 +716,8 @@ class PTSampler(object):
                 i0=i0,
                 neff=neff,
                 writeHotChains=writeHotChains,
-                beta_schedule=beta_schedule,
-                hold_iter=hold_iter,
+                betaSchedule=betaSchedule,
+                holdIter=holdIter,
                 hotChain=hotChain,
                 nameChainTemps=nameChainTemps
             )
@@ -788,14 +788,14 @@ class PTSampler(object):
 
         # Scheduled-beta runs change the target distribution each iteration
         # so update beta and recompute lnprob0 before proposing the next move
-        if self.beta_schedule is not None:
+        if self.betaSchedule is not None:
             current_idx = i0
-            if current_idx < 0 or current_idx >= len(self.beta_schedule):
+            if current_idx < 0 or current_idx >= len(self.betaSchedule):
                 raise IndexError(
-                    f"beta_schedule index out of range at initialization: idx={current_idx}, len={len(self.beta_schedule)}"
+                    f"betaSchedule index out of range at initialization: idx={current_idx}, len={len(self.betaSchedule)}"
                 )
 
-            self.beta = float(self.beta_schedule[current_idx])
+            self.beta = float(self.betaSchedule[current_idx])
 
             if not self.modelswitch:
                 lp0 = self.logp(p0)
@@ -948,13 +948,13 @@ class PTSampler(object):
             self.randomizeProposalCycle()
         
         # Scheduled beta runs change targets by state, so update beta before proposing
-        if self.beta_schedule is not None:
+        if self.betaSchedule is not None:
             idx = iter
-            if idx < 0 or idx >= len(self.beta_schedule):
+            if idx < 0 or idx >= len(self.betaSchedule):
                 raise IndexError(
-                    f"beta_schedule index out of range: idx={idx}, len={len(self.beta_schedule)}"
+                    f"betaSchedule index out of range: idx={idx}, len={len(self.betaSchedule)}"
                 )
-            self.beta = float(self.beta_schedule[idx])
+            self.beta = float(self.betaSchedule[idx])
 
             if not self.modelswitch:
                 lp0 = self.logp(p0)
