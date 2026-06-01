@@ -452,6 +452,9 @@ class PTSampler(object):
                         f"ladder has length {self.ladder.size}, but MPI size/nchain is {self.nchain}"
                     )
 
+            # beta for current PT chain
+            self.beta = float(self.ladder[self.MPIrank])
+
             # beta for current chain
             self.beta = float(self.ladder[self.MPIrank])
 
