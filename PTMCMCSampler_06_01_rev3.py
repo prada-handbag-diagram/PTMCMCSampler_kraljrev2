@@ -267,15 +267,15 @@ class PTSampler(object):
         chains (default=False)
 
         """
-        # Scheduled-beta mode uses an explicit beta value for each sampler state
+        
+        # Optional scheduled-beta mode.
+        # self.betaSchedule is the only flag: None means ordinary PT/non-scheduled mode.
         self.betaSchedule = None
-        scheduling_active = betaSchedule is not None
 
         if holdIter < 0:
             raise ValueError("holdIter must be >= 0")
 
-        # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
-        if scheduling_active:
+        if betaSchedule is not None:
             if hotChain:
                 raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
@@ -287,30 +287,28 @@ class PTSampler(object):
                     f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
                     "Run without MPI or use a single MPI process."
                 )
-    
-            # Parse betaSchedule as a one-dimensional array of beta values
-            beta_core = np.asarray(betaSchedule, dtype=float)
-            
-            if beta_core.ndim != 1:
+
+            self.betaSchedule = np.asarray(betaSchedule, dtype=float)
+
+            if self.betaSchedule.ndim != 1:
                 raise ValueError("betaSchedule must be a one-dimensional sequence of beta values")
-                        
-            # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
-            hold = np.zeros(int(holdIter), dtype=float)
-            full = np.concatenate([hold, beta_core])
-    
-            if full.ndim != 1 or full.size == 0:
+
+            if holdIter > 0:
+                hold = np.zeros(int(holdIter), dtype=float)
+                self.betaSchedule = np.concatenate([hold, self.betaSchedule])
+
+            if self.betaSchedule.size == 0:
                 raise ValueError("betaSchedule produced an empty schedule")
-            if not np.all(np.isfinite(full)):
+            if not np.all(np.isfinite(self.betaSchedule)):
                 raise ValueError("betaSchedule contains non-finite values")
-            if np.min(full) < 0.0 or np.max(full) > 1.0:
+            if np.min(self.betaSchedule) < 0.0 or np.max(self.betaSchedule) > 1.0:
                 raise ValueError("betaSchedule values must lie in [0, 1]")
-    
-            self.betaSchedule = full
-            self.beta = float(full[0])
+
+            self.beta = float(self.betaSchedule[0])
 
             # Warn if thinning skips beta schedule points
             if thin != 1:
-                n_total = len(full)
+                n_total = len(self.betaSchedule)
                 n_used = (n_total + thin - 1) // thin  # ceil division
             
                 percent = 100.0 * n_used / n_total
@@ -322,7 +320,7 @@ class PTSampler(object):
                 )
     
             # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1 
-            Niter = int(full.size) - 1
+            Niter = int(self.betaSchedule.size) - 1
             if maxIter is None:
                 maxIter = Niter
 
@@ -431,7 +429,7 @@ class PTSampler(object):
         self.randomizeProposalCycle()
 
         # Ladder setup
-        if scheduling_active:
+        if self.betaSchedule is not None:
             # varying-beta run: no PT ladder
             self.ladder = np.array([1.0])
         else:
@@ -458,7 +456,7 @@ class PTSampler(object):
             self.beta = float(self.ladder[self.MPIrank])
 
         # Name chain files
-        if scheduling_active:
+        if self.betaSchedule is not None:
             # beta changes over time, fixed filename for scheduled runs
             self.fname = self.outDir + "/chain_schedule.txt"
         else:
