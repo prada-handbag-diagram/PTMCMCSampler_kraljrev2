@@ -196,10 +196,7 @@ class PTSampler(object):
         self,
         Niter,
         ladder=None,
-        shape="geometric",
-        Bmax=1,
-        Bmin=None,
-        Tmin=None,
+        Tmin=1,
         Tmax=None,
         Tskip=100,
         isave=1000,
@@ -229,13 +226,12 @@ class PTSampler(object):
         @param Niter: Number of iterations to use for T = 1 chain. If
         betaSchedule is supplied, this is replaced by len(betaSchedule)-1
         after any holdIter plateau is prepended.
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted.
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is
-        not already given (default='geometric')
-        @param Tmin: Minimum temperature in ladder (default=None)
-        @param Tmax: Maximum temperature in ladder (default=None)
+        @param ladder: User defined inverse-temperature/beta ladder.
+        Values must lie in [0, 1].
+        @param Tmin: Minimum temperature used only to construct the default
+        inverse-temperature/beta ladder (default=1)
+        @param Tmax: Maximum temperature used only to construct the default
+        inverse-temperature/beta ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
         @param isave: Write to file every isave samples (default=1000)
@@ -356,8 +352,6 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Scheduled-beta chains add a leading beta column; standard PT output keeps the usual layout
-        self.write_beta_col = (self.betaSchedule is not None)
 
         N = int(maxIter / thin) + 1  # first sample + those we generate
 
@@ -370,8 +364,11 @@ class PTSampler(object):
         self.swapProposed = 0
         self.nswap_accepted = 0
 
-        self.n_metaparams = 8 if self.modelswitch else 4
-
+        # Always write 9 diagnostic/output columns after the sampled parameters:
+        # lnprob, lnlike, lnprob1, lnlike1, lnprob2, lnlike2,
+        # acceptance, PT acceptance, beta.
+        self.n_metaparams = 9
+        
         if self.modelswitch:
             self._lnprob1 = np.zeros(N)
             self._lnlike1 = np.zeros(N)
@@ -438,21 +435,27 @@ class PTSampler(object):
             # varying-beta run: no PT ladder
             self.ladder = np.array([1.0])
         else:
-            # if ladder given check if in temp or beta
-            if self.ladder is not None and len(self.ladder) > 0:
-                if max(self.ladder) > 1:
-                    # user gave temperatures >>> convert to beta
-                    self.ladder = [1 / temp for temp in self.ladder]
-
-            # ladder not specified, create one
+            if self.ladder is None:
+                # This returns inverse temperatures/betas.
+                # Nothing below stores temperature internally.
+                self.ladder = self.betaLadder(Tmin, Tmax=Tmax)
             else:
-                # If temperatures are used, convert to beta
-                if Tmin:  # used temperatures
-                    Bmax = 1 / Tmin  # Tmin is typically 1
-                if Tmax:
-                    Bmin = 1 / Tmax
+                # User-supplied ladder is interpreted directly as beta values.
+                self.ladder = np.asarray(self.ladder, dtype=float)
 
-                self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+                if self.ladder.ndim != 1 or self.ladder.size == 0:
+                    raise ValueError("ladder must be a one-dimensional non-empty sequence of beta values")
+                if not np.all(np.isfinite(self.ladder)):
+                    raise ValueError("ladder contains non-finite values")
+                if np.min(self.ladder) < 0.0 or np.max(self.ladder) > 1.0:
+                    raise ValueError("ladder entries must be inverse temperatures/betas in [0, 1]")
+                if self.ladder.size != self.nchain:
+                    raise ValueError(
+                        f"ladder has length {self.ladder.size}, but MPI size/nchain is {self.nchain}"
+                    )
+
+            # beta for current chain
+            self.beta = float(self.ladder[self.MPIrank])
 
             # beta for current chain (only meaningful for PT runs)
             self.beta = self.ladder[self.MPIrank]
@@ -484,12 +487,11 @@ class PTSampler(object):
                 print("Resuming run from chain file {0}".format(self.fname))
             try:
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
-                expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
+                expected_cols = self.ndim + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
-                    current_mode = "betaSchedule=True" if self.write_beta_col else "betaSchedule=False"
                     raise Exception(
-                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
-                        f"but found {self.resumechain.shape[1]}. "
+                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns "
+                        f"(ndim + 9 diagnostic/output columns), but found {self.resumechain.shape[1]}. "
                         "This usually means the chain file was created with a different resume/output format."
                     )
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
@@ -610,11 +612,8 @@ class PTSampler(object):
         self,
         p0,
         Niter,
-        Bmax=1,
-        Bmin=None,
         ladder=None,
-        shape="geometric",
-        Tmin=None,
+        Tmin=1,
         Tmax=None,
         Tskip=100,
         isave=1000,
@@ -644,13 +643,12 @@ class PTSampler(object):
         @param p0: Initial parameter vector
         @param Niter: Number of iterations to use for T = 1 chain. If
         betaSchedule is supplied, the schedule length determines the run length.
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is
-        not already given (default='geometric')
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted
-        @param Tmin: Minimum temperature in ladder (default=None)
-        @param Tmax: Maximum temperature in ladder (default=None)
+        @param ladder: User defined inverse-temperature/beta ladder.
+        Values must lie in [0, 1].
+        @param Tmin: Minimum temperature used only to construct the default
+        inverse-temperature/beta ladder (default=1)
+        @param Tmax: Maximum temperature used only to construct the default
+        inverse-temperature/beta ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
         @param isave: Write to file every isave samples (default=1000)
@@ -693,10 +691,7 @@ class PTSampler(object):
         if i0 == 0:
             self.initialize(
                 Niter,
-                Bmax=Bmax,
-                Bmin=Bmin,
                 ladder=ladder,
-                shape=shape,
                 Tmin=Tmin,
                 Tmax=Tmax,
                 Tskip=Tskip,
@@ -726,27 +721,21 @@ class PTSampler(object):
         if self.resume and self.resumeLength > 0:
 
             last_row = self.resumeLength - 1
-            param_start = 1 if self.write_beta_col else 0
 
-            if self.write_beta_col:
-                self.beta = self.resumechain[last_row, 0]
-            else:
-                # Standard PT output does not store beta, so beta comes from the ladder
-                self.beta = self.ladder[self.MPIrank]
+            p0 = self.resumechain[last_row, : self.ndim]
 
-            p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
-
-            lnprob0 = self.resumechain[last_row, -self.n_metaparams]
-            lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
+            lnprob0 = self.resumechain[last_row, -9]
+            lnlike0 = self.resumechain[last_row, -8]
+            self.beta = float(self.resumechain[last_row, -1])
 
             if self.modelswitch:
-                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 2)]
-                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 3)]
-                lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 4)]
-                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
+                lnprob1 = self.resumechain[last_row, -7]
+                lnlike1 = self.resumechain[last_row, -6]
+                lnprob2 = self.resumechain[last_row, -5]
+                lnlike2 = self.resumechain[last_row, -4]
 
             self.ind_next_write = self.resumeLength
-            self.naccepted = int(round(((self.resumeLength - 1) * self.thin) * self.resumechain[last_row, -2]))
+            self.naccepted = int(round(((self.resumeLength - 1) * self.thin) * self.resumechain[last_row, -3]))
             i0 = (self.resumeLength - 1) * self.thin
 
         else:
@@ -1129,62 +1118,49 @@ class PTSampler(object):
 
         return p0, lnlike0, lnprob0
 
-    def Ladder(self, Bmax, Bmin=None, tstep=None, shape="geometric"):
+    def betaLadder(self, Tmin=1, Tmax=None, tstep=None):
         """
-        Method to compute temperature/beta ladder. The default is a geometrically
-        spaced ladder with a spacing designed to give 25 % temperature/beta swap
-        acceptance rate. The other option is a linear spacing.
+        Method to compute an inverse-temperature/beta ladder.
+
+        Tmin and Tmax are temperature-style inputs used only to choose the
+        spacing. The returned ladder is beta = 1 / T, because this sampler
+        uses beta internally everywhere.
 
         """
 
-        # TODO: make options to do other temperature ladders
+        if Tmin is None:
+            Tmin = 1
+
+        if Tmin <= 0:
+            raise ValueError("Tmin must be positive")
+        if Tmax is not None and Tmax <= 0:
+            raise ValueError("Tmax must be positive")
 
         if self.nchain > 1:
-            if shape == "linear":
-                if tstep is None and Bmin is None:  # Bmin set to 0
-                    if Bmin is None:
-                        warnings.warn("Bmin not given. Bmin will be set to 0 for linear spacing.")
-                        Bmin = 0
-                    tstep = Bmax / (self.nchain - 1)
+            if tstep is None and Tmax is None:
+                tstep = 1 + np.sqrt(2 / self.ndim)
 
-                elif tstep is None and Bmin is not None:
-                    tstep = (Bmax - Bmin) / (self.nchain - 1)
+            elif tstep is None and Tmax is not None:
+                tstep = np.exp(np.log(Tmax / Tmin) / (self.nchain - 1))
 
-                ladder = np.zeros(self.nchain)
-                for ii in range(self.nchain):
-                    ladder[ii] = round(Bmax - (tstep * ii), 5)
-
-            if shape == "geometric":
-                if tstep is None and Bmin is None:
-                    tstep = 1 + np.sqrt(2 / self.ndim)
-
-                elif tstep is None and Bmin is not None:
-                    if Bmin == 0:
-                        warnings.warn(
-                            "Bmin set to 0. Geometric series can only approach beta=0. Make sure to include the"
-                            "hot chain to get a beta=0 chain if you haven't already. Bmin will be set to 1e-7."
-                        )
-                        Bmin = 1e-7
-                    tstep = np.exp(np.log(Bmin / Bmax) / (1 - self.nchain))  # Bmin can't be 0 here
-
-                ladder = np.zeros(self.nchain)
-                for ii in range(self.nchain):
-                    ladder[ii] = Bmax * tstep ** (-ii)
+            ladder = np.zeros(self.nchain)
+            for ii in range(self.nchain):
+                ladder[ii] = 1.0 / (Tmin * tstep**ii)
         else:
-            ladder = np.array([Bmax])
+            ladder = np.array([1.0 / Tmin])
 
         return ladder
 
     def _writeToFile(self, iter):
         """
-        Function to write chain file. In standard PTMCMC mode, file has
-        ndim+4 columns: parameter values, log-posterior, log-likelihood,
-        acceptance rate, and PT acceptance rate. In scheduled-beta mode,
-        a leading beta column is written before the parameter values.
-        If doing model-switching there are an additional 4 columns:
-        log-posterior of model 1, log-likelihood of model 1,
-        log-posterior of model 2, and log-likelihood of model 2.
-        Rates are as of time of writing.
+        Function to write chain file. In every mode, file has ndim+9 columns:
+        parameter values followed by
+
+        lnprob, lnlike, lnprob1, lnlike1, lnprob2, lnlike2,
+        acceptance rate, PT acceptance rate, beta.
+
+        For non-model-switching runs, the model-specific columns repeat the
+        main lnprob/lnlike values. Rates are as of time of writing.
 
         @param iter: Iteration of sampler
 
@@ -1198,35 +1174,37 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
-            # beta column only for varying-beta runs
-            if self.write_beta_col:
-                self._chainfile.write("%22.22f\t" % self._beta[ind])
-
-            # then parameters (always)
+            # parameters first
             self._chainfile.write(
                 "\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)])
             )
 
-            # main posterior / likelihood for the active chain state
-            self._chainfile.write(
-                "\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind])
-            )
-
-            # extra model-switch diagnostics, if present
             if self.modelswitch:
-                self._chainfile.write(
-                    "\t%f\t%f\t%f\t%f"
-                    % (
-                        self._lnprob1[ind],
-                        self._lnlike1[ind],
-                        self._lnprob2[ind],
-                        self._lnlike2[ind],
-                    )
-                )
+                lnprob1 = self._lnprob1[ind]
+                lnlike1 = self._lnlike1[ind]
+                lnprob2 = self._lnprob2[ind]
+                lnlike2 = self._lnlike2[ind]
+            else:
+                # Non-model-switch runs still write the same 9 diagnostic columns.
+                # Repeat the main values in the model-specific slots.
+                lnprob1 = self._lnprob[ind]
+                lnlike1 = self._lnlike[ind]
+                lnprob2 = self._lnprob[ind]
+                lnlike2 = self._lnlike[ind]
 
-            # acceptance metadata goes last
             self._chainfile.write(
-                "\t%f\t%f\n" % (self.naccepted / iter if iter > 0 else 0, pt_acc)
+                "\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%22.22f\n"
+                % (
+                    self._lnprob[ind],
+                    self._lnlike[ind],
+                    lnprob1,
+                    lnlike1,
+                    lnprob2,
+                    lnlike2,
+                    self.naccepted / iter if iter > 0 else 0,
+                    pt_acc,
+                    self._beta[ind],
+                )
             )
         self._chainfile.close()
         self.ind_next_write = write_end  # Ready for next write
