@@ -457,9 +457,6 @@ class PTSampler(object):
             # beta for current chain
             self.beta = float(self.ladder[self.MPIrank])
 
-            # beta for current chain (only meaningful for PT runs)
-            self.beta = self.ladder[self.MPIrank]
-
         # Name chain files
         if scheduling_active:
             # beta changes over time, fixed filename for scheduled runs
