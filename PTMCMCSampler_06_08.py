@@ -356,20 +356,21 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Scheduled-beta chains add a leading beta column; standard PT output keeps the usual layout
-        self.write_beta_col = (self.betaSchedule is not None)
+        # Non-model switch output has ndim+4 layout for compatibility. Scheduled and model switch has ndim + 9
+        self.write_beta_col = self.modelswitch
 
-        N = int(maxIter / thin) + 1  # first sample + those we generate
+        N = int(maxIter / thin) + 1  
 
         self._lnprob = np.zeros(N)
         self._lnlike = np.zeros(N)
         self._chain = np.zeros((N, self.ndim))
         self._beta = np.zeros(N)
-        self.ind_next_write = 0  # Next index in these arrays to write out
+        self.ind_next_write = 0  
         self.naccepted = 0
         self.swapProposed = 0
         self.nswap_accepted = 0
 
+        # Number of trailing diagnostics after any optional beta column. Resume negative indexing expects lnprob0 at -self.n_metaparams.
         self.n_metaparams = 8 if self.modelswitch else 4
 
         if self.modelswitch:
@@ -484,12 +485,17 @@ class PTSampler(object):
                 print("Resuming run from chain file {0}".format(self.fname))
             try:
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
-                expected_cols = (1 if self.write_beta_col else 0) + self.ndim + self.n_metaparams
+                expected_cols = self.ndim + (1 if self.write_beta_col else 0) + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
-                    current_mode = "betaSchedule=True" if self.write_beta_col else "betaSchedule=False"
+                    current_mode = "model-switch" if self.modelswitch else "non-model-switch"
+                    expected_format = (
+                        "parameters + beta + 8 diagnostics"
+                        if self.modelswitch
+                        else "parameters + 4 diagnostics"
+                    )
                     raise Exception(
-                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns for {current_mode}, "
-                        f"but found {self.resumechain.shape[1]}. "
+                        f"Cannot resume chain file {self.fname}: expected {expected_cols} columns "
+                        f"({expected_format}) for {current_mode}, but found {self.resumechain.shape[1]}. "
                         "This usually means the chain file was created with a different resume/output format."
                     )
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
@@ -726,16 +732,25 @@ class PTSampler(object):
         if self.resume and self.resumeLength > 0:
 
             last_row = self.resumeLength - 1
-            param_start = 1 if self.write_beta_col else 0
+            resume_iter = (self.resumeLength - 1) * self.thin
 
             if self.write_beta_col:
-                self.beta = self.resumechain[last_row, 0]
+                # Model-switch files store beta immediately after the sampled parameters.
+                self.beta = float(self.resumechain[last_row, self.ndim])
+            elif self.betaSchedule is not None:
+                # Non-model-switch scheduled-beta files keep the old ndim+4 layout,
+                # so recover beta from the supplied schedule rather than the file.
+                if resume_iter < 0 or resume_iter >= len(self.betaSchedule):
+                    raise IndexError(
+                        f"betaSchedule index out of range during resume: "
+                        f"idx={resume_iter}, len={len(self.betaSchedule)}"
+                    )
+                self.beta = float(self.betaSchedule[resume_iter])
             else:
-                # Standard PT output does not store beta, so beta comes from the ladder
+                # Standard PT output does not store beta, so beta comes from the ladder.
                 self.beta = self.ladder[self.MPIrank]
 
-            p0 = self.resumechain[last_row, param_start : param_start + self.ndim]
-
+            p0 = self.resumechain[last_row, : self.ndim]
             lnprob0 = self.resumechain[last_row, -self.n_metaparams]
             lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
 
@@ -746,8 +761,8 @@ class PTSampler(object):
                 lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
 
             self.ind_next_write = self.resumeLength
-            self.naccepted = int(round(((self.resumeLength - 1) * self.thin) * self.resumechain[last_row, -2]))
-            i0 = (self.resumeLength - 1) * self.thin
+            self.naccepted = int(round(resume_iter * self.resumechain[last_row, -2]))
+            i0 = resume_iter
 
         else:
             # compute prior and likelihood
@@ -1177,14 +1192,14 @@ class PTSampler(object):
 
     def _writeToFile(self, iter):
         """
-        Function to write chain file. In standard PTMCMC mode, file has
-        ndim+4 columns: parameter values, log-posterior, log-likelihood,
-        acceptance rate, and PT acceptance rate. In scheduled-beta mode,
-        a leading beta column is written before the parameter values.
-        If doing model-switching there are an additional 4 columns:
-        log-posterior of model 1, log-likelihood of model 1,
-        log-posterior of model 2, and log-likelihood of model 2.
-        Rates are as of time of writing.
+        Function to write chain file. Non-model-switch output keeps the
+        historical ndim+4 layout: parameter values, log-posterior,
+        log-likelihood, acceptance rate, and PT acceptance rate.
+        Model-switch output has one format for all beta behavior:
+        parameter values followed by 9 diagnostics: beta, log-posterior,
+        log-likelihood, model-1 log-posterior, model-1 log-likelihood,
+        model-2 log-posterior, model-2 log-likelihood, acceptance rate,
+        and PT acceptance rate.
 
         @param iter: Iteration of sampler
 
@@ -1198,15 +1213,15 @@ class PTSampler(object):
             if self.MPIrank < self.nchain - 1 and self.swapProposed != 0:
                 pt_acc = self.nswap_accepted / self.swapProposed
 
-            # beta column only for varying-beta runs
-            if self.write_beta_col:
-                self._chainfile.write("%22.22f\t" % self._beta[ind])
-
-            # then parameters (always)
+            # parameters always come first
             self._chainfile.write(
                 "\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)])
             )
 
+            # model-switch output always carries beta as the first diagnostic column
+            if self.write_beta_col:
+                self._chainfile.write("\t%22.22f" % self._beta[ind])
+                
             # main posterior / likelihood for the active chain state
             self._chainfile.write(
                 "\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind])
