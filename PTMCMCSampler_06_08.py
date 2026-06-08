@@ -196,10 +196,7 @@ class PTSampler(object):
         self,
         Niter,
         ladder=None,
-        shape="geometric",
-        Bmax=1,
-        Bmin=None,
-        Tmin=None,
+        Tmin=1,
         Tmax=None,
         Tskip=100,
         isave=1000,
@@ -229,12 +226,9 @@ class PTSampler(object):
         @param Niter: Number of iterations to use for T = 1 chain. If
         betaSchedule is supplied, this is replaced by len(betaSchedule)-1
         after any holdIter plateau is prepended.
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted.
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is
-        not already given (default='geometric')
-        @param Tmin: Minimum temperature in ladder (default=None)
+        @param ladder: User defined temperature/beta ladder. If entries are
+        greater than 1 they are interpreted as temperatures and converted to beta.
+        @param Tmin: Minimum temperature in ladder (default=1)
         @param Tmax: Maximum temperature in ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
@@ -273,13 +267,12 @@ class PTSampler(object):
         """
         # Scheduled-beta mode uses an explicit beta value for each sampler state
         self.betaSchedule = None
-        scheduling_active = betaSchedule is not None
 
         if holdIter < 0:
             raise ValueError("holdIter must be >= 0")
 
         # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
-        if scheduling_active:
+        if betaSchedule is not None:
             if hotChain:
                 raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
@@ -302,8 +295,10 @@ class PTSampler(object):
             hold = np.zeros(int(holdIter), dtype=float)
             full = np.concatenate([hold, beta_core])
     
-            if full.ndim != 1 or full.size == 0:
-                raise ValueError("betaSchedule produced an empty schedule")
+            if full.ndim != 1 or full.size < 2:
+                raise ValueError(
+                    "betaSchedule must contain at least two states after holdIter is applied"
+                )
             if not np.all(np.isfinite(full)):
                 raise ValueError("betaSchedule contains non-finite values")
             if np.min(full) < 0.0 or np.max(full) > 1.0:
@@ -325,10 +320,9 @@ class PTSampler(object):
                     RuntimeWarning
                 )
     
-            # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1 
+            # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1
             Niter = int(full.size) - 1
-            if maxIter is None:
-                maxIter = Niter
+            maxIter = Niter
 
         # Default maxIter for non-scheduled runs
         if maxIter is None:
@@ -356,7 +350,7 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Non-model switch output has ndim+4 layout for compatibility. Scheduled and model switch has ndim + 9
+        # Non-model switch output keeps the historical ndim+4 layout for compatibility. Model switch output gets beta plus the 8 trailing diagnostics
         self.write_beta_col = self.modelswitch
 
         N = int(maxIter / thin) + 1  
@@ -435,31 +429,31 @@ class PTSampler(object):
         self.randomizeProposalCycle()
 
         # Ladder setup
-        if scheduling_active:
+        if self.betaSchedule is not None:
             # varying-beta run: no PT ladder
             self.ladder = np.array([1.0])
         else:
-            # if ladder given check if in temp or beta
+            # If a ladder is supplied, accept either temperatures (>1) or betas (<=1).
             if self.ladder is not None and len(self.ladder) > 0:
-                if max(self.ladder) > 1:
-                    # user gave temperatures >>> convert to beta
-                    self.ladder = [1 / temp for temp in self.ladder]
+                self.ladder = np.asarray(self.ladder, dtype=float)
+                if self.ladder.ndim != 1 or self.ladder.size == 0:
+                    raise ValueError("ladder must be a one-dimensional sequence")
+                if not np.all(np.isfinite(self.ladder)):
+                    raise ValueError("ladder contains non-finite values")
+                if np.max(self.ladder) > 1.0:
+                    self.ladder = 1.0 / self.ladder
+                if np.min(self.ladder) < 0.0 or np.max(self.ladder) > 1.0:
+                    raise ValueError("beta ladder values must lie in [0, 1]")
 
-            # ladder not specified, create one
+            # ladder not specified, create beta ladder from the original temperature inputs
             else:
-                # If temperatures are used, convert to beta
-                if Tmin:  # used temperatures
-                    Bmax = 1 / Tmin  # Tmin is typically 1
-                if Tmax:
-                    Bmin = 1 / Tmax
-
-                self.ladder = self.Ladder(Bmax, Bmin=Bmin, shape=shape)
+                self.ladder = self.Ladder(Tmin, Tmax=Tmax)
 
             # beta for current chain (only meaningful for PT runs)
             self.beta = self.ladder[self.MPIrank]
 
         # Name chain files
-        if scheduling_active:
+        if self.betaSchedule is not None:
             # beta changes over time, fixed filename for scheduled runs
             self.fname = self.outDir + "/chain_schedule.txt"
         else:
@@ -616,11 +610,8 @@ class PTSampler(object):
         self,
         p0,
         Niter,
-        Bmax=1,
-        Bmin=None,
         ladder=None,
-        shape="geometric",
-        Tmin=None,
+        Tmin=1,
         Tmax=None,
         Tskip=100,
         isave=1000,
@@ -650,12 +641,9 @@ class PTSampler(object):
         @param p0: Initial parameter vector
         @param Niter: Number of iterations to use for T = 1 chain. If
         betaSchedule is supplied, the schedule length determines the run length.
-        @param Bmax: Maximum beta in ladder (default=1)
-        @param Bmin: Minimum beta in ladder (default=None)
-        @param shape: Specifies shape of beta/temperature ladder if a ladder is
-        not already given (default='geometric')
-        @param ladder: User defined temperature/beta ladder. Either scheme accepted
-        @param Tmin: Minimum temperature in ladder (default=None)
+        @param ladder: User defined temperature/beta ladder. If entries are
+        greater than 1 they are interpreted as temperatures and converted to beta.
+        @param Tmin: Minimum temperature in ladder (default=1)
         @param Tmax: Maximum temperature in ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
@@ -699,10 +687,7 @@ class PTSampler(object):
         if i0 == 0:
             self.initialize(
                 Niter,
-                Bmax=Bmax,
-                Bmin=Bmin,
                 ladder=ladder,
-                shape=shape,
                 Tmin=Tmin,
                 Tmax=Tmax,
                 Tskip=Tskip,
@@ -1144,52 +1129,37 @@ class PTSampler(object):
 
         return p0, lnlike0, lnprob0
 
-    def Ladder(self, Bmax, Bmin=None, tstep=None, shape="geometric"):
+    def Ladder(self, Tmin=1, Tmax=None, tstep=None):
         """
-        Method to compute temperature/beta ladder. The default is a geometrically
-        spaced ladder with a spacing designed to give 25 % temperature/beta swap
-        acceptance rate. The other option is a linear spacing.
-
+        Method to compute beta ladder. This mirrors the public sampler's
+        geometrically spaced temperature ladder, but stores inverse temperatures
+        beta = 1 / T.
         """
 
-        # TODO: make options to do other temperature ladders
+        if Tmin is None:
+            Tmin = 1
+        if Tmin <= 0:
+            raise ValueError("Tmin must be > 0")
+        if Tmax is not None and Tmax <= 0:
+            raise ValueError("Tmax must be > 0")
+        if Tmax is not None and Tmax < Tmin:
+            raise ValueError("Tmax must be >= Tmin")
 
         if self.nchain > 1:
-            if shape == "linear":
-                if tstep is None and Bmin is None:  # Bmin set to 0
-                    if Bmin is None:
-                        warnings.warn("Bmin not given. Bmin will be set to 0 for linear spacing.")
-                        Bmin = 0
-                    tstep = Bmax / (self.nchain - 1)
+            if tstep is None and Tmax is None:
+                tstep = 1 + np.sqrt(2 / self.ndim)
+            elif tstep is None and Tmax is not None:
+                tstep = np.exp(np.log(Tmax / Tmin) / (self.nchain - 1))
 
-                elif tstep is None and Bmin is not None:
-                    tstep = (Bmax - Bmin) / (self.nchain - 1)
-
-                ladder = np.zeros(self.nchain)
-                for ii in range(self.nchain):
-                    ladder[ii] = round(Bmax - (tstep * ii), 5)
-
-            if shape == "geometric":
-                if tstep is None and Bmin is None:
-                    tstep = 1 + np.sqrt(2 / self.ndim)
-
-                elif tstep is None and Bmin is not None:
-                    if Bmin == 0:
-                        warnings.warn(
-                            "Bmin set to 0. Geometric series can only approach beta=0. Make sure to include the"
-                            "hot chain to get a beta=0 chain if you haven't already. Bmin will be set to 1e-7."
-                        )
-                        Bmin = 1e-7
-                    tstep = np.exp(np.log(Bmin / Bmax) / (1 - self.nchain))  # Bmin can't be 0 here
-
-                ladder = np.zeros(self.nchain)
-                for ii in range(self.nchain):
-                    ladder[ii] = Bmax * tstep ** (-ii)
+            beta0 = 1.0 / Tmin
+            ladder = np.zeros(self.nchain)
+            for ii in range(self.nchain):
+                ladder[ii] = beta0 * tstep ** (-ii)
         else:
-            ladder = np.array([Bmax])
+            ladder = np.array([1.0])
 
         return ladder
-
+        
     def _writeToFile(self, iter):
         """
         Function to write chain file. Non-model-switch output keeps the
