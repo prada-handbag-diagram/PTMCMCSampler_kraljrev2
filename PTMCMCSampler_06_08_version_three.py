@@ -276,13 +276,10 @@ class PTSampler(object):
             if hotChain:
                 raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
-                raise ValueError(
-                    f"betaSchedule is not compatible with ladder={ladder}. Omit ladder for betaSchedule runs."
-                )
+                raise ValueError("betaSchedule is not compatible with ladder being set")
             if self.nchain > 1:
                 raise ValueError(
-                    f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}. "
-                    "Run without MPI or use a single MPI process."
+                    f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}"
                 )
     
             # Parse betaSchedule as a one-dimensional array of beta values
@@ -306,19 +303,6 @@ class PTSampler(object):
                 raise ValueError("betaSchedule values must be finite and lie in [0, 1]")
     
             self.beta = float(self.betaSchedule[0])
-
-            # Warn if thinning skips beta schedule points
-            if thin != 1:
-                n_total = len(self.betaSchedule)
-                n_used = (n_total + thin - 1) // thin  # ceil division
-            
-                percent = 100.0 * n_used / n_total
-            
-                warnings.warn(
-                    f"[betaSchedule] thin={thin} -> using {percent:.1f}% "
-                    f"of beta grid ({n_used}/{n_total} points retained)",
-                    RuntimeWarning
-                )
     
             # The schedule gives beta values for states, so the number of transitions is len(schedule) - 1
             Niter = int(self.betaSchedule.size) - 1
