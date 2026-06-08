@@ -281,14 +281,10 @@ class PTSampler(object):
                     f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}"
                 )
     
-            # Parse betaSchedule as a one-dimensional array of beta values
-            beta_core = np.asarray(self.betaSchedule, dtype=float)
-            
-            if beta_core.ndim != 1:
-                raise ValueError("betaSchedule must be a one-dimensional sequence of beta values")
-                        
             # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
-            self.betaSchedule = np.concatenate([np.zeros(int(holdIter), dtype=float), beta_core])
+            self.betaSchedule = np.concatenate(
+                [np.zeros(int(holdIter), dtype=float), np.asarray(self.betaSchedule, dtype=float)]
+            )
     
             if self.betaSchedule.size < 2:
                 raise ValueError(
