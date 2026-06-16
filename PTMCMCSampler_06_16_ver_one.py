@@ -253,10 +253,10 @@ class PTSampler(object):
         @param writeHotChains: If True, write hot chains to disk
         @param hotChain: If True, include a beta=0 hot chain
         @param betaSchedule: Optional sequence of inverse temperatures/betas,
-        interpreted as one beta value per sampler state. If supplied, the run
-        uses a single chain with beta changing deterministically by schedule
-        state, parallel tempering is disabled, and ladder/hotChain are not used.
-        Values must lie in [0, 1].
+        interpreted as one beta value per sampler state. Only supported for
+        model-switching runs. If supplied, the run uses a single chain with beta
+        changing deterministically by schedule state, parallel tempering is
+        disabled, and ladder/hotChain are not used. Values must lie in [0, 1].
         @param holdIter: Number of initial beta=0 schedule states to prepend
         before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
@@ -269,8 +269,10 @@ class PTSampler(object):
         if holdIter < 0:
             raise ValueError("holdIter must be >= 0")
 
-        # A beta schedule is a single chain mode, so reject PT-only options before building the schedule
+        # A beta schedule is a single-chain model-switch mode, so reject incompatible options before building the schedule
         if self.betaSchedule is not None:
+            if not self.modelswitch:
+                raise ValueError("betaSchedule is only supported for model-switching runs")
             if hotChain:
                 raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
@@ -328,10 +330,7 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        # Non-model switch output keeps the historical ndim+4 layout for compatibility. Model switch output gets beta plus the 8 trailing diagnostics
-        self.write_beta_col = self.modelswitch
-
-        N = int(maxIter / thin) + 1  
+        N = int(maxIter / thin) + 1   
 
         self._lnprob = np.zeros(N)
         self._lnlike = np.zeros(N)
@@ -342,8 +341,8 @@ class PTSampler(object):
         self.swapProposed = 0
         self.nswap_accepted = 0
 
-        # Number of trailing diagnostics after any optional beta column. Resume negative indexing expects lnprob0 at -self.n_metaparams.
-        self.n_metaparams = 8 if self.modelswitch else 4
+        # Number of metaparameters written after the sampled parameters. Model switch output includes beta as its first metaparameter.
+        self.n_metaparams = 9 if self.modelswitch else 4
 
         if self.modelswitch:
             self._lnprob1 = np.zeros(N)
@@ -457,13 +456,13 @@ class PTSampler(object):
                 print("Resuming run from chain file {0}".format(self.fname))
             try:
                 self.resumechain = np.loadtxt(self.fname, ndmin=2)
-                expected_cols = self.ndim + (1 if self.write_beta_col else 0) + self.n_metaparams
+                expected_cols = self.ndim + self.n_metaparams
                 if self.resumechain.shape[1] != expected_cols:
                     current_mode = "model-switch" if self.modelswitch else "non-model-switch"
                     expected_format = (
-                        "parameters + beta + 8 diagnostics"
+                        "parameters + 9 metaparameters"
                         if self.modelswitch
-                        else "parameters + 4 diagnostics"
+                        else "parameters + 4 metaparameters"
                     )
                     raise Exception(
                         f"Cannot resume chain file {self.fname}: expected {expected_cols} columns "
@@ -531,7 +530,7 @@ class PTSampler(object):
         if iter % self.thin == 0:
             ind = int(iter / self.thin)
             self._chain[ind, :] = p0
-            # Save the beta actually used for this sample so scheduled beta output and resume agree
+            # In model switch output, beta is written as the first metaparameter
             self._beta[ind] = self.beta
             self._lnlike[ind] = lnlike0
             self._lnprob[ind] = lnprob0
@@ -648,11 +647,12 @@ class PTSampler(object):
         @param writeHotChains: If True, write hot chains to disk
         @param hotChain: If True, include a beta=0 hot chain
         @param betaSchedule: Optional sequence of inverse temperatures/betas,
-        interpreted as one beta value per sampler state. If supplied, the sampler
-        performs a varying-beta run rather than standard parallel tempering.
-        Parallel tempering swaps are disabled, only single-chain runs are
-        supported, ladder and hotChain cannot be used, and the number of
-        transition steps is len(full_schedule)-1.
+        interpreted as one beta value per sampler state. Only supported for
+        model-switching runs. If supplied, the sampler performs a varying-beta
+        run rather than standard parallel tempering. Parallel tempering swaps are
+        disabled, only single-chain runs are supported, ladder and hotChain
+        cannot be used, and the number of transition steps is
+        len(full_schedule)-1
         @param holdIter: Number of initial beta=0 schedule states to prepend
         before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
@@ -697,32 +697,25 @@ class PTSampler(object):
             last_row = self.resumeLength - 1
             resume_iter = (self.resumeLength - 1) * self.thin
 
-            if self.write_beta_col:
-                # Model-switch files store beta immediately after the sampled parameters.
+                        if self.modelswitch:
+                # Model-switch files store beta as the first metaparameter.
                 self.beta = float(self.resumechain[last_row, self.ndim])
-            elif self.betaSchedule is not None:
-                # Non-model-switch scheduled-beta files keep the old ndim+4 layout,
-                # so recover beta from the supplied schedule rather than the file.
-                if resume_iter < 0 or resume_iter >= len(self.betaSchedule):
-                    raise IndexError(
-                        f"betaSchedule index out of range during resume: "
-                        f"idx={resume_iter}, len={len(self.betaSchedule)}"
-                    )
-                self.beta = float(self.betaSchedule[resume_iter])
             else:
                 # Standard PT output does not store beta, so beta comes from the ladder.
                 self.beta = self.ladder[self.MPIrank]
 
             p0 = self.resumechain[last_row, : self.ndim]
-            lnprob0 = self.resumechain[last_row, -self.n_metaparams]
-            lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
 
             if self.modelswitch:
-                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 2)]
-                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 3)]
-                lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 4)]
-                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
-
+                lnprob0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
+                lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 2)]
+                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 3)]
+                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 4)]
+                lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
+                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 6)]
+            else:
+                lnprob0 = self.resumechain[last_row, -self.n_metaparams]
+                lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
             self.ind_next_write = self.resumeLength
             self.naccepted = int(round(resume_iter * self.resumechain[last_row, -2]))
             i0 = resume_iter
@@ -764,8 +757,7 @@ class PTSampler(object):
 
                     lnprob0 = self.beta * (lnlike0) + lnprob2  
 
-        # Scheduled-beta runs change the target distribution each iteration
-        # so update beta and recompute lnprob0 before proposing the next move
+        # Scheduled beta runs change the model switch target distribution each iteration
         if self.betaSchedule is not None:
             current_idx = i0
             if current_idx < 0 or current_idx >= len(self.betaSchedule):
@@ -774,18 +766,10 @@ class PTSampler(object):
                 )
 
             self.beta = float(self.betaSchedule[current_idx])
-
-            if not self.modelswitch:
-                lp0 = self.logp(p0)
-                if lp0 == -np.inf or (not np.isfinite(lnlike0)):
-                    lnprob0 = -np.inf
-                else:
-                    lnprob0 = self.beta * lnlike0 + lp0
+            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                lnprob0 = -np.inf
             else:
-                if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
-                    lnprob0 = -np.inf
-                else:
-                    lnprob0 = self.beta * lnlike0 + lnprob2
+                lnprob0 = self.beta * lnlike0 + lnprob2
         
         if not self.modelswitch:
             # record first values
@@ -925,7 +909,7 @@ class PTSampler(object):
             # randomize cycle
             self.randomizeProposalCycle()
         
-        # Scheduled beta runs change targets by state, so update beta before proposing
+        # Scheduled beta runs change the model-switch target by state
         if self.betaSchedule is not None:
             idx = iter
             if idx < 0 or idx >= len(self.betaSchedule):
@@ -934,17 +918,10 @@ class PTSampler(object):
                 )
             self.beta = float(self.betaSchedule[idx])
 
-            if not self.modelswitch:
-                lp0 = self.logp(p0)
-                if lp0 == -np.inf or not np.isfinite(lnlike0):
-                    lnprob0 = -np.inf
-                else:
-                    lnprob0 = self.beta * lnlike0 + lp0
+            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                lnprob0 = -np.inf
             else:
-                if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
-                    lnprob0 = -np.inf
-                else:
-                    lnprob0 = self.beta * lnlike0 + lnprob2
+                lnprob0 = self.beta * lnlike0 + lnprob2
         
         # jump proposal, once sample() has restored the last saved state, resume proceeds normally
         y, qxy, jump_name = self._jump(p0, iter)  # made a jump
@@ -1144,7 +1121,7 @@ class PTSampler(object):
         historical ndim+4 layout: parameter values, log-posterior,
         log-likelihood, acceptance rate, and PT acceptance rate.
         Model-switch output has one format for all beta behavior:
-        parameter values followed by 9 diagnostics: beta, log-posterior,
+        parameter values followed by 9 metaparameters: beta, log-posterior,
         log-likelihood, model-1 log-posterior, model-1 log-likelihood,
         model-2 log-posterior, model-2 log-likelihood, acceptance rate,
         and PT acceptance rate.
@@ -1166,8 +1143,8 @@ class PTSampler(object):
                 "\t".join(["%22.22f" % (self._chain[ind, kk]) for kk in range(self.ndim)])
             )
 
-            # model-switch output always carries beta as the first diagnostic column
-            if self.write_beta_col:
+            # Model-switch output writes beta as the first metaparameter
+            if self.modelswitch:
                 self._chainfile.write("\t%22.22f" % self._beta[ind])
                 
             # main posterior / likelihood for the active chain state
