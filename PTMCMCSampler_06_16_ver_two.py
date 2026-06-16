@@ -652,7 +652,7 @@ class PTSampler(object):
         run rather than standard parallel tempering. Parallel tempering swaps are
         disabled, only single-chain runs are supported, ladder and hotChain
         cannot be used, and the number of transition steps is
-        len(full_schedule)-1
+        len(self.betaSchedule)-1
         @param holdIter: Number of initial beta=0 schedule states to prepend
         before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
@@ -697,11 +697,11 @@ class PTSampler(object):
             last_row = self.resumeLength - 1
             resume_iter = (self.resumeLength - 1) * self.thin
 
-                        if self.modelswitch:
-                # Model-switch files store beta as the first metaparameter.
+            if self.modelswitch:
+                # Model-switch files store beta as the first metaparameter
                 self.beta = float(self.resumechain[last_row, self.ndim])
             else:
-                # Standard PT output does not store beta, so beta comes from the ladder.
+                # Standard PT output does not store beta, so beta comes from the ladder
                 self.beta = self.ladder[self.MPIrank]
 
             p0 = self.resumechain[last_row, : self.ndim]
