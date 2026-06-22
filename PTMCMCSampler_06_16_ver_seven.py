@@ -469,9 +469,14 @@ class PTSampler(object):
                         "This usually means the chain file was created with a different resume/output format."
                     )
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
-            except ValueError as error:
-                print("Reading old chain files failed with error", error)
-                raise Exception("Couldn't read old chain to resume")
+            if self.betaSchedule is not None:
+                saved_betas = self.resumechain[:, self.ndim]
+                expected_betas = self.betaSchedule[:: self.thin]
+
+                if self.resumeLength > len(expected_betas) or not np.allclose(
+                    saved_betas, expected_betas[: self.resumeLength]
+                ):
+                    raise ValueError("Saved beta values do not match betaSchedule")
             self._chainfile = open(self.fname, "a")
             if (self.resumeLength - 1) % (self.isave / self.thin) != 0:  # Initial sample plus blocks of isave/thin
                 raise Exception(
@@ -566,9 +571,14 @@ class PTSampler(object):
                 elapsed = time.time() - self.tstart
                 if self.resume:
                     # Percentage of new work done
-                    percentnew = (
-                        (iter - self.resumeLength * self.thin) / (self.Niter - self.resumeLength * self.thin) * 100
-                    )
+                    if self.Niter <= self.resumeLength * self.thin:
+                        percentnew = 100
+                    else:
+                        percentnew = (
+                            (iter - self.resumeLength * self.thin)
+                            / (self.Niter - self.resumeLength * self.thin)
+                            * 100
+                        )
                     sys.stdout.write(
                         "Finished %2.2f percent (%2.2f percent of new work) in %f s Acceptance rate = %g"
                         % (percent, percentnew, elapsed, acceptance)
@@ -687,34 +697,28 @@ class PTSampler(object):
                 nameChainTemps=nameChainTemps
             )
 
-        # Compute the initial log probability. When resuming, continue from the last saved sample
+        # compute lnprob for initial point in chain
+
+        # if resuming, just start with first point in chain
         if self.resume and self.resumeLength > 0:
-
-            last_row = self.resumeLength - 1
-            resume_iter = (self.resumeLength - 1) * self.thin
-
             if self.modelswitch:
-                # Model-switch files store beta as the first metaparameter
-                self.beta = float(self.resumechain[last_row, self.ndim])
-            else:
-                # Standard PT output does not store beta, so beta comes from the ladder
-                self.beta = self.ladder[self.MPIrank]
+                p0 = self.resumechain[0, : self.ndim]
+                self.beta = self.resumechain[0, self.ndim]
+                lnprob0 = self.resumechain[0, self.ndim + 1]
+                lnlike0 = self.resumechain[0, self.ndim + 2]
+                lnprob1 = self.resumechain[0, self.ndim + 3]
+                lnlike1 = self.resumechain[0, self.ndim + 4]
+                lnprob2 = self.resumechain[0, self.ndim + 5]
+                lnlike2 = self.resumechain[0, self.ndim + 6]
 
-            p0 = self.resumechain[last_row, : self.ndim]
-
-            if self.modelswitch:
-                lnprob0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
-                lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 2)]
-                lnprob1 = self.resumechain[last_row, -(self.n_metaparams - 3)]
-                lnlike1 = self.resumechain[last_row, -(self.n_metaparams - 4)]
-                lnprob2 = self.resumechain[last_row, -(self.n_metaparams - 5)]
-                lnlike2 = self.resumechain[last_row, -(self.n_metaparams - 6)]
             else:
-                lnprob0 = self.resumechain[last_row, -self.n_metaparams]
-                lnlike0 = self.resumechain[last_row, -(self.n_metaparams - 1)]
+                p0, lnlike0, lnprob0 = (
+                    self.resumechain[0, :-4],
+                    self.resumechain[0, -3],
+                    self.resumechain[0, -4],
+                )
+
             self.ind_next_write = self.resumeLength
-            self.naccepted = int(round(resume_iter * self.resumechain[last_row, -2]))
-            i0 = resume_iter
 
         else:
             # compute prior and likelihood
@@ -767,12 +771,13 @@ class PTSampler(object):
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
         
+        # record first values
+        self.tstart = time.time()
+
         if not self.modelswitch:
-            # record first values
             self.updateChains(p0, lnlike0, lnprob0, i0)
 
-        else:  
-            # record first values
+        else:
             self.updateChains(
                 p0,
                 lnlike0,
@@ -785,7 +790,6 @@ class PTSampler(object):
             )
 
         self.comm.barrier()
-        self.tstart = time.time()
 
         # start iterations
         iter = i0
@@ -919,70 +923,101 @@ class PTSampler(object):
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
         
-        # jump proposal, once sample() has restored the last saved state, resume proceeds normally
-        y, qxy, jump_name = self._jump(p0, iter)  # made a jump
-        self.jumpDict[jump_name][0] += 1
+        # jump proposal ###
 
-        # compute prior and likelihood
-        if not self.modelswitch:
-            lp = self.logp(y)
+        # if resuming, just use previous chain points. Use each one thin times to compensate for
+        # thinning when they were written out
+        if self.resume and self.resumeLength > 0 and iter < self.resumeLength * self.thin:
+            row = self.resumechain[iter // self.thin]
 
-            if lp == -np.inf:
-                newlnlike = -np.inf
-                newlnprob = -np.inf
-
-            else:
-                newlnlike = self.logl(y)
-                newlnprob = self.beta * newlnlike + lp
-
-        else: 
-
-            lp1 = self.logp1(y)
-            lp2 = self.logp2(y)
-
-            # Set all model specific log values on invalid proposals so rejected jumps do not leave undefined variables
-            if lp1 == -np.inf or lp2 == -np.inf:
-                newlnlike = -np.inf
-                newlnprob = -np.inf
-                newlnlike1 = -np.inf
-                newlnprob1 = -np.inf
-                newlnlike2 = -np.inf
-                newlnprob2 = -np.inf
-
-            else:
-                newlnlike1 = self.logl1(y)
-                newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
-
-                newlnlike2 = self.logl2(y)
-                newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
-
-                newlnlike = newlnprob1 - newlnprob2
-
-                # ln posterior = beta * ln likelihood + ln prior
-                # ln prior is set to ln posterior of the second model
-                # ln likelihood is the difference between ln posterior of the first and second models
-                # beta determines how much of newlnprob1 vs newlnprob2
-                newlnprob = self.beta * (newlnlike) + newlnprob2
-
-        # hastings step
-        diff = newlnprob - lnprob0 + qxy
-
-        rand_log = np.log(self.stream.random())
-        if diff > rand_log:
-                
-            # accept jump
-            p0, lnlike0, lnprob0 = y, newlnlike, newlnprob
             if self.modelswitch:
-                lnlike1, lnlike2, lnprob1, lnprob2 = (
-                    newlnlike1,
-                    newlnlike2,
-                    newlnprob1,
-                    newlnprob2,
-                )
+                p0 = row[: self.ndim]
+
+                if self.betaSchedule is None:
+                    self.beta = row[self.ndim]
+
+                lnprob0 = row[self.ndim + 1]
+                lnlike0 = row[self.ndim + 2]
+                lnprob1 = row[self.ndim + 3]
+                lnlike1 = row[self.ndim + 4]
+                lnprob2 = row[self.ndim + 5]
+                lnlike2 = row[self.ndim + 6]
+
+                if self.betaSchedule is not None:
+                    if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                        lnprob0 = -np.inf
+                    else:
+                        lnprob0 = self.beta * lnlike0 + lnprob2
+
+            else:
+                p0, lnlike0, lnprob0 = row[:-4], row[-3], row[-4]
 
             # update acceptance counter
-            self.naccepted += 1
-            self.jumpDict[jump_name][1] += 1
+            self.naccepted = iter * row[-2]
+
+        else:
+            y, qxy, jump_name = self._jump(p0, iter)
+            self.jumpDict[jump_name][0] += 1
+
+            # compute prior and likelihood
+            if not self.modelswitch:
+                lp = self.logp(y)
+
+                if lp == -np.inf:
+                    newlnlike = -np.inf
+                    newlnprob = -np.inf
+
+                else:
+                    newlnlike = self.logl(y)
+                    newlnprob = self.beta * newlnlike + lp
+
+            else:
+                lp1 = self.logp1(y)
+                lp2 = self.logp2(y)
+
+                # Set all model specific log values on invalid proposals so rejected jumps do not leave undefined variables
+                if lp1 == -np.inf or lp2 == -np.inf:
+                    newlnlike = -np.inf
+                    newlnprob = -np.inf
+                    newlnlike1 = -np.inf
+                    newlnprob1 = -np.inf
+                    newlnlike2 = -np.inf
+                    newlnprob2 = -np.inf
+
+                else:
+                    newlnlike1 = self.logl1(y)
+                    newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
+
+                    newlnlike2 = self.logl2(y)
+                    newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
+
+                    newlnlike = newlnprob1 - newlnprob2
+
+                    # ln posterior = beta * ln likelihood + ln prior
+                    # ln prior is set to ln posterior of the second model
+                    # ln likelihood is the difference between ln posterior of the first and second models
+                    # beta determines how much of newlnprob1 vs newlnprob2
+                    newlnprob = self.beta * newlnlike + newlnprob2
+
+            # hastings step
+            diff = newlnprob - lnprob0 + qxy
+
+            rand_log = np.log(self.stream.random())
+            if diff > rand_log:
+                # accept jump
+                p0, lnlike0, lnprob0 = y, newlnlike, newlnprob
+
+                if self.modelswitch:
+                    lnlike1, lnlike2, lnprob1, lnprob2 = (
+                        newlnlike1,
+                        newlnlike2,
+                        newlnprob1,
+                        newlnprob2,
+                    )
+
+                # update acceptance counter
+                self.naccepted += 1
+                self.jumpDict[jump_name][1] += 1
 
         # Update chains
         if self.modelswitch:
