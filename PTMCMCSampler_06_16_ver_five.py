@@ -133,11 +133,11 @@ class PTSampler(object):
                     "For model-switching, logl and logp must be tuples of length 2."
                 )
 
-            # Tuple index 1 is treated as model 1, and tuple index 0 is treated as model 2
-            self.logl1 = _function_wrapper(logl[1], loglargs, loglkwargs)
-            self.logl2 = _function_wrapper(logl[0], loglargs, loglkwargs)
-            self.logp1 = _function_wrapper(logp[1], logpargs, logpkwargs)
-            self.logp2 = _function_wrapper(logp[0], logpargs, logpkwargs)
+            # Tuple index 0 is treated as model 1, and tuple index 1 is treated as model 2
+            self.logl1 = _function_wrapper(logl[0], loglargs, loglkwargs)
+            self.logl2 = _function_wrapper(logl[1], loglargs, loglkwargs)
+            self.logp1 = _function_wrapper(logp[0], logpargs, logpkwargs)
+            self.logp2 = _function_wrapper(logp[1], logpargs, logpkwargs)
 
         else:
             self.logl = _function_wrapper(logl, loglargs, loglkwargs)
@@ -288,9 +288,8 @@ class PTSampler(object):
             )
     
             if self.betaSchedule.size < 2:
-                raise ValueError(
-                    "betaSchedule must contain at least two states after holdIter is applied"
-                )
+                raise ValueError("betaSchedule must contain at least two states")
+                
             if (
                 not np.all(np.isfinite(self.betaSchedule))
                 or np.min(self.betaSchedule) < 0.0
@@ -330,13 +329,13 @@ class PTSampler(object):
         self.neff = neff
         self.tstart = 0
             
-        N = int(maxIter / thin) + 1   
+        N = int(maxIter / thin) + 1  # first sample + those we generate
 
         self._lnprob = np.zeros(N)
         self._lnlike = np.zeros(N)
         self._chain = np.zeros((N, self.ndim))
         self._beta = np.zeros(N)
-        self.ind_next_write = 0  
+        self.ind_next_write = 0  # Next index in these arrays to write out
         self.naccepted = 0
         self.swapProposed = 0
         self.nswap_accepted = 0
@@ -474,10 +473,7 @@ class PTSampler(object):
                 print("Reading old chain files failed with error", error)
                 raise Exception("Couldn't read old chain to resume")
             self._chainfile = open(self.fname, "a")
-            if (
-                self.isave != self.thin  # This special case is always OK
-                and self.resumeLength % (self.isave / self.thin) != 1  # Initial sample plus blocks of isave/thin
-            ):
+            if (self.resumeLength - 1) % (self.isave / self.thin) != 0:  # Initial sample plus blocks of isave/thin
                 raise Exception(
                     (
                         "Old chain has {0} rows, which is not the initial sample plus a multiple of isave/thin = {1}"
@@ -1075,6 +1071,7 @@ class PTSampler(object):
                 new_p0s[j] = p0s[swap_map[j]]
                 new_log_Ls[j] = log_Ls[swap_map[j]]
 
+        # broadcast the new samples and log_Ls to all chains
         p0 = self.comm.scatter(new_p0s, root=0)
         lnlike0 = self.comm.scatter(new_log_Ls, root=0)
         self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
@@ -1086,9 +1083,8 @@ class PTSampler(object):
 
     def Ladder(self, Tmin=1, Tmax=None, tstep=None):
         """
-        Method to compute beta ladder. This mirrors the public sampler's
-        geometrically spaced temperature ladder, but stores inverse temperatures
-        beta = 1 / T.
+        Method to compute a geometrically spaced inverse-temperature ladder,
+        where beta = 1 / T
         """
 
         if Tmin is None:
@@ -1117,14 +1113,13 @@ class PTSampler(object):
         
     def _writeToFile(self, iter):
         """
-        Function to write chain file. Non-model-switch output keeps the
-        historical ndim+4 layout: parameter values, log-posterior,
-        log-likelihood, acceptance rate, and PT acceptance rate.
-        Model-switch output has one format for all beta behavior:
+        Function to write chain file. Non-model-switch output has parameter
+        values followed by 4 metaparameters: log-posterior, log-likelihood,
+        acceptance rate, and PT acceptance rate. Model-switch output has
         parameter values followed by 9 metaparameters: beta, log-posterior,
         log-likelihood, model-1 log-posterior, model-1 log-likelihood,
         model-2 log-posterior, model-2 log-likelihood, acceptance rate,
-        and PT acceptance rate.
+        and PT acceptance rate
 
         @param iter: Iteration of sampler
 
