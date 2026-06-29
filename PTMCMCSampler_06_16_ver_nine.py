@@ -429,6 +429,8 @@ class PTSampler(object):
                 self.ladder = self.Ladder(Tmin, Tmax=Tmax)
 
             # beta for current chain (only meaningful for PT runs)
+            if hotChain and self.nchain > 1:
+                self.ladder[-1] = 0.0
             self.beta = self.ladder[self.MPIrank]
 
         # Name chain files
