@@ -1011,8 +1011,7 @@ class PTSampler(object):
             # hastings step
             diff = newlnprob - lnprob0 + qxy
 
-            rand_log = np.log(self.stream.random())
-            if diff > rand_log:
+            if diff > np.log(self.stream.random()):
                 # accept jump
                 p0, lnlike0, lnprob0 = y, newlnlike, newlnprob
 
