@@ -1322,6 +1322,9 @@ class PTSampler(object):
         else:
             scale = 1.0
 
+        # adjust scale based on temperature
+        if (not self.modelswitch) and beta >= 0.01:
+            scale *= np.sqrt(1 / beta)
 
         # get parmeters in new diagonalized basis
         # y = np.dot(self.U.T, x[self.covinds])
@@ -1377,6 +1380,9 @@ class PTSampler(object):
         else:
             scale = 1.0
 
+        # adjust scale based on temperature
+        if (not self.modelswitch) and beta >= 0.01:
+            scale *= np.sqrt(1 / beta)
 
         # get parmeters in new diagonalized basis
         y = np.dot(self.U[jumpind].T, x[self.groups[jumpind]])
@@ -1424,7 +1430,14 @@ class PTSampler(object):
         while mm == nn:
             nn = self.stream.integers(0, bufsize)
 
-        scale = 1.0
+        # get jump scale size
+        prob = self.stream.random()
+
+        # mode jump
+        if prob > 0.5 or self.modelswitch or beta <= 0.0:
+            scale = 1.0
+        else:
+            scale = self.stream.random() * 2.4 / np.sqrt(2 * ndim) * np.sqrt(1 / beta)
 
         for ii in range(ndim):
 
