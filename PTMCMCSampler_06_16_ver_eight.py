@@ -307,6 +307,9 @@ class PTSampler(object):
         if maxIter is None:
             maxIter = Niter
 
+        if self.resume:
+            isave = thin
+        
         if isave % thin != 0:
             raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
 
