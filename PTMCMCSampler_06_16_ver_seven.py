@@ -469,6 +469,10 @@ class PTSampler(object):
                         "This usually means the chain file was created with a different resume/output format."
                     )
                 self.resumeLength = self.resumechain.shape[0]  # Number of samples read from old chain
+            except ValueError as error:
+                print("Reading old chain files failed with error", error)
+                raise Exception("Couldn't read old chain to resume")
+            
             if self.betaSchedule is not None:
                 saved_betas = self.resumechain[:, self.ndim]
                 expected_betas = self.betaSchedule[:: self.thin]
