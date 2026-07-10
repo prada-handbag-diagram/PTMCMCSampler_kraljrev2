@@ -215,7 +215,6 @@ class PTSampler(object):
         writeHotChains=False,
         hotChain=False,
         betaSchedule=None,
-        holdIter=0,
         nameChainTemps=False
     ):
         """
@@ -223,7 +222,6 @@ class PTSampler(object):
 
         @param Niter: Number of iterations to use for T = 1 chain. If
         betaSchedule is supplied, this is replaced by len(betaSchedule)-1
-        after any holdIter plateau is prepended.
         @param ladder: User defined temperature/beta ladder. If entries are
         greater than 1 they are interpreted as temperatures and converted to beta.
         @param Tmin: Minimum temperature in ladder (default=1)
@@ -257,17 +255,12 @@ class PTSampler(object):
         model-switching runs. If supplied, the run uses a single chain with beta
         changing deterministically by schedule state, parallel tempering is
         disabled, and ladder/hotChain are not used. Values must lie in [0, 1].
-        @param holdIter: Number of initial beta=0 schedule states to prepend
-        before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
         chains (default=False)
 
         """
         # Scheduled-beta mode uses an explicit beta value for each sampler state
         self.betaSchedule = betaSchedule
-
-        if holdIter < 0:
-            raise ValueError("holdIter must be >= 0")
 
         # A beta schedule is a single-chain model-switch mode, so reject incompatible options before building the schedule
         if self.betaSchedule is not None:
@@ -282,10 +275,8 @@ class PTSampler(object):
                     f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}"
                 )
     
-            # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
-            self.betaSchedule = np.concatenate(
-                [np.zeros(int(holdIter), dtype=float), np.asarray(self.betaSchedule, dtype=float)]
-            )
+            # Convert the user-supplied schedule to a numeric array for validation and indexing
+            self.betaSchedule = np.asarray(self.betaSchedule, dtype=float)
     
             if self.betaSchedule.size < 2:
                 raise ValueError("betaSchedule must contain at least two states")
@@ -624,7 +615,6 @@ class PTSampler(object):
         writeHotChains=False,
         hotChain=False,
         betaSchedule=None,
-        holdIter=0,
         nameChainTemps=False,
     ):
         """
@@ -668,8 +658,6 @@ class PTSampler(object):
         disabled, only single-chain runs are supported, ladder and hotChain
         cannot be used, and the number of transition steps is
         len(self.betaSchedule)-1
-        @param holdIter: Number of initial beta=0 schedule states to prepend
-        before following betaSchedule.
         @param nameChainTemps: Reverts to temperature naming convention of
         chains (default=False)
 
@@ -701,7 +689,6 @@ class PTSampler(object):
                 neff=neff,
                 writeHotChains=writeHotChains,
                 betaSchedule=betaSchedule,
-                holdIter=holdIter,
                 hotChain=hotChain,
                 nameChainTemps=nameChainTemps
             )
