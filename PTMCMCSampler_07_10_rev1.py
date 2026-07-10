@@ -657,7 +657,7 @@ class PTSampler(object):
         run rather than standard parallel tempering. Parallel tempering swaps are
         disabled, only single-chain runs are supported, ladder and hotChain
         cannot be used, and the number of transition steps is
-        len(self.betaSchedule)-1
+        len(betaSchedule) - 1
         @param nameChainTemps: Reverts to temperature naming convention of
         chains (default=False)
 
