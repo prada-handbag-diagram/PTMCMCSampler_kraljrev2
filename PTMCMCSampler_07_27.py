@@ -1078,39 +1078,32 @@ class PTSampler(object):
         @return lnprob0: new log posterior value
 
         """
-        betas = np.asarray(self.ladder, dtype=float)
+        betas = self.ladder
 
-        log_Ls = self.comm.gather(lnlike0, root=0)
-        p0s = self.comm.gather(p0, root=0)
-
+        log_Ls = self.comm.gather(lnlike0, root=0)  # list of likelihoods from each chain
+        p0s = self.comm.gather(p0, root=0)  # list of parameter arrays from each chain
         swap_accepted = np.zeros(self.nchain)
-
-        new_p0s = None
-        new_log_Ls = None
+        new_p0s = np.zeros_like(p0s)
+        new_log_Ls = np.zeros_like(log_Ls)
 
         if self.MPIrank == 0:
-            new_p0s = [None] * self.nchain
-            new_log_Ls = [None] * self.nchain
-
-            # swap_map maps each chain index to the gathered state currently assigned to it.
+            # set up map to help keep track of swaps
             swap_map = list(range(self.nchain))
 
-            # Propose adjacent swaps from the hottest chain toward the cold chain.
+            # loop through and propose a swap at each chain (starting from hottest chain and going down in T)
+            # and keep track of results in swap_map
             for swap_chain in reversed(range(self.nchain - 1)):
-                a = swap_map[swap_chain]
-                b = swap_map[swap_chain + 1]
+                log_acc_ratio = -log_Ls[swap_map[swap_chain]] * betas[swap_chain]
+                log_acc_ratio += -log_Ls[swap_map[swap_chain + 1]] * betas[swap_chain + 1]
+                log_acc_ratio += log_Ls[swap_map[swap_chain + 1]] * betas[swap_chain]
+                log_acc_ratio += log_Ls[swap_map[swap_chain]] * betas[swap_chain + 1]
 
-                log_acc_ratio = (betas[swap_chain] - betas[swap_chain + 1]) * (
-                    log_Ls[b] - log_Ls[a]
-                )
-
-                if np.log(self.stream.random()) <= log_acc_ratio:
-                    swap_map[swap_chain], swap_map[swap_chain + 1] = (
-                        swap_map[swap_chain + 1],
-                        swap_map[swap_chain],
-                    )
+                acc_ratio = np.exp(log_acc_ratio)
+                if self.stream.uniform() <= acc_ratio:
+                    swap_map[swap_chain], swap_map[swap_chain + 1] = swap_map[swap_chain + 1], swap_map[swap_chain]
                     swap_accepted[swap_chain] += 1
 
+            # loop through the chains and record the new samples and log_Ls
             for j in range(self.nchain):
                 new_p0s[j] = p0s[swap_map[j]]
                 new_log_Ls[j] = log_Ls[swap_map[j]]
@@ -1121,6 +1114,7 @@ class PTSampler(object):
         self.nswap_accepted += self.comm.scatter(swap_accepted, root=0)
         self.swapProposed += 1
 
+        # calculate new posterior values
         lnprob0 = self.beta * lnlike0 + self.logp(p0)
 
         return p0, lnlike0, lnprob0
