@@ -747,24 +747,33 @@ class PTSampler(object):
                 lp1 = self.logp1(p0)
                 lp2 = self.logp2(p0)
 
-                if lp1 == -np.inf or lp2 == -np.inf:
-                    lnprob0 = -np.inf
-                    lnlike0 = -np.inf
+                if lp1 == -np.inf:
                     lnlike1 = -np.inf
                     lnprob1 = -np.inf
-                    lnlike2 = -np.inf
-                    lnprob2 = -np.inf
-
                 else:
-                    lnlike1 = self.logl1(p0) 
+                    lnlike1 = self.logl1(p0)
                     lnprob1 = lnlike1 + lp1
 
+                if lp2 == -np.inf:
+                    lnlike2 = -np.inf
+                    lnprob2 = -np.inf
+                else:
                     lnlike2 = self.logl2(p0)
                     lnprob2 = lnlike2 + lp2
 
+                if lnprob1 == -np.inf and lnprob2 == -np.inf:
+                    lnlike0 = -np.inf
+                else:
                     lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
 
-                    lnprob0 = self.beta * (lnlike0) + lnprob2  
+                if self.beta == 0.0:
+                    lnprob0 = lnprob2
+                elif self.beta == 1.0:
+                    lnprob0 = lnprob1
+                elif not np.isfinite(lnprob1) or not np.isfinite(lnprob2):
+                    lnprob0 = -np.inf
+                else:
+                    lnprob0 = self.beta * lnlike0 + lnprob2
 
         # Scheduled beta runs change the model switch target distribution each iteration
         if self.betaSchedule is not None:
@@ -775,7 +784,11 @@ class PTSampler(object):
                 )
 
             self.beta = float(self.betaSchedule[current_idx])
-            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+            if self.beta == 0.0:
+                lnprob0 = lnprob2
+            elif self.beta == 1.0:
+                lnprob0 = lnprob1
+            elif (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
                 lnprob0 = -np.inf
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
@@ -927,7 +940,11 @@ class PTSampler(object):
                 )
             self.beta = float(self.betaSchedule[idx])
 
-            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+            if self.beta == 0.0:
+                lnprob0 = lnprob2
+            elif self.beta == 1.0:
+                lnprob0 = lnprob1
+            elif (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
                 lnprob0 = -np.inf
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
@@ -953,7 +970,11 @@ class PTSampler(object):
                 lnlike2 = row[self.ndim + 6]
 
                 if self.betaSchedule is not None:
-                    if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+                    if self.beta == 0.0:
+                        lnprob0 = lnprob2
+                    elif self.beta == 1.0:
+                        lnprob0 = lnprob1
+                    elif (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
                         lnprob0 = -np.inf
                     else:
                         lnprob0 = self.beta * lnlike0 + lnprob2
@@ -984,24 +1005,32 @@ class PTSampler(object):
                 lp1 = self.logp1(y)
                 lp2 = self.logp2(y)
 
-                # Set all model specific log values on invalid proposals so rejected jumps do not leave undefined variables
-                if lp1 == -np.inf or lp2 == -np.inf:
-                    newlnlike = -np.inf
-                    newlnprob = -np.inf
+                if lp1 == -np.inf:
                     newlnlike1 = -np.inf
                     newlnprob1 = -np.inf
-                    newlnlike2 = -np.inf
-                    newlnprob2 = -np.inf
-
                 else:
                     newlnlike1 = self.logl1(y)
                     newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
 
+                if lp2 == -np.inf:
+                    newlnlike2 = -np.inf
+                    newlnprob2 = -np.inf
+                else:
                     newlnlike2 = self.logl2(y)
                     newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
 
+                if newlnprob1 == -np.inf and newlnprob2 == -np.inf:
+                    newlnlike = -np.inf
+                else:
                     newlnlike = newlnprob1 - newlnprob2
 
+                if self.beta == 0.0:
+                    newlnprob = newlnprob2
+                elif self.beta == 1.0:
+                    newlnprob = newlnprob1
+                elif not np.isfinite(newlnprob1) or not np.isfinite(newlnprob2):
+                    newlnprob = -np.inf
+                else:
                     # ln posterior = beta * ln likelihood + ln prior
                     # ln prior is set to ln posterior of the second model
                     # ln likelihood is the difference between ln posterior of the first and second models
