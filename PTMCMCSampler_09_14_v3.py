@@ -240,7 +240,10 @@ class PTSampler(object):
         @param Tmax: Maximum temperature in ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
-        @param isave: Write to file every isave samples (default=1000)
+        @param isave: Write to file every isave iterations (default=1000).
+        isave and thin must be positive integers, with isave a multiple of thin.
+        Resuming preserves isave and requires 1 + k * (isave // thin) saved
+        rows for a nonnegative integer k
         @param covUpdate: Number of iterations between AM covariance updates
         (default=1000)
         @param SCAMweight: Weight of SCAM jumps in overall jump cycle
@@ -269,8 +272,10 @@ class PTSampler(object):
         disabled, and ladder/hotChain are not used. Values must lie in [0, 1].
         @param holdIter: Number of initial beta=0 schedule states to prepend
         before following betaSchedule.
-        @param nameChainTemps: Reverts to temperature naming convention of
-        chains (default=False)
+        @param nameChainTemps: If True, name chains by temperature; if False,
+        name chains by beta. If None (default), use temperature names for
+        ordinary PT and beta names for model switch. Scheduled beta runs
+        always use chain_schedule.txt
 
         """
         # Scheduled-beta mode uses an explicit beta value for each sampler state
