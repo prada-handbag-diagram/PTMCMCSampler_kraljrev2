@@ -51,7 +51,9 @@ class PTSampler(object):
     jump proposals with the ``addProposalToCycle`` function.
 
     The sampler also supports model-switching when tuples of
-    log-likelihood and log-prior functions are supplied.
+    log likelihood and log prior functions are supplied. Model switch mode
+    requires an MPI communicator of size 1 and does not support gradient
+    arguments.
 
     @param ndim: number of dimensions in problem
     @param logl: single log-likelihood function or tuple of log-likelihood
@@ -128,6 +130,12 @@ class PTSampler(object):
         self.modelswitch = logl_is_tuple
 
         if self.modelswitch:
+            if self.nchain > 1:
+                raise ValueError(
+                    "Model-switch mode currently supports only a single chain; "
+                    f"MPI communicator size is {self.nchain}."
+                )
+
             # This code assumes exactly two models
             if len(logl) != 2 or len(logp) != 2:
                 raise ValueError("For model-switching, logl and logp must be tuples of length 2.")
@@ -141,6 +149,9 @@ class PTSampler(object):
         else:
             self.logl = _function_wrapper(logl, loglargs, loglkwargs)
             self.logp = _function_wrapper(logp, logpargs, logpkwargs)
+
+        if self.modelswitch and (logl_grad is not None or logp_grad is not None):
+            raise ValueError("Gradients are not yet implemented in model-switch mode.")
 
         if logl_grad is not None and logp_grad is not None:
             self.logl_grad = _function_wrapper(logl_grad, loglargs, loglkwargs)
@@ -215,7 +226,7 @@ class PTSampler(object):
         hotChain=False,
         betaSchedule=None,
         holdIter=0,
-        nameChainTemps=False,
+        nameChainTemps=None,
     ):
         """
         Initialize MCMC quantities
@@ -277,8 +288,6 @@ class PTSampler(object):
                 raise ValueError("hotChain is not compatible with betaSchedule runs")
             if ladder is not None:
                 raise ValueError("betaSchedule is not compatible with ladder being set")
-            if self.nchain > 1:
-                raise ValueError(f"betaSchedule is only supported for single-chain runs, but MPI size is {self.nchain}")
 
             # Prepend a beta=0 flat section before the user schedule when an initial hold is requested
             self.betaSchedule = np.concatenate(
@@ -305,11 +314,19 @@ class PTSampler(object):
         if maxIter is None:
             maxIter = Niter
 
-        if self.resume:
-            isave = thin
+        for name, value in (("isave", isave), ("thin", thin)):
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, (int, np.integer))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive integer")
+
+        isave = int(isave)
+        thin = int(thin)
 
         if isave % thin != 0:
-            raise ValueError("isave = %d is not a multiple of thin =  %d" % (isave, thin))
+            raise ValueError(f"isave = {isave} is not a multiple of thin = {thin}")
 
         if Niter % thin != 0:
             print(
@@ -432,6 +449,10 @@ class PTSampler(object):
                 self.ladder[-1] = 0.0
             self.beta = self.ladder[self.MPIrank]
 
+        # Default to temperature names for ordinary PT and beta names for model-switch
+        if nameChainTemps is None:
+            nameChainTemps = not self.modelswitch
+
         # Name chain files
         if self.betaSchedule is not None:
             # beta changes over time, fixed filename for scheduled runs
@@ -483,13 +504,14 @@ class PTSampler(object):
                     saved_betas, expected_betas[: self.resumeLength]
                 ):
                     raise ValueError("Saved beta values do not match betaSchedule")
-            self._chainfile = open(self.fname, "a")
-            if (self.resumeLength - 1) % (self.isave / self.thin) != 0:  # Initial sample plus blocks of isave/thin
-                raise Exception(
-                    (
-                        "Old chain has {0} rows, which is not the initial sample plus a multiple of isave/thin = {1}"
-                    ).format(self.resumeLength, self.isave // self.thin)
+            block_rows = self.isave // self.thin
+            if self.resumeLength < 1 or (self.resumeLength - 1) % block_rows != 0:
+                raise ValueError(
+                    f"Old chain has {self.resumeLength} rows; expected "
+                    f"1 + k * (isave // thin) = 1 + k * {block_rows} "
+                    "rows for a nonnegative integer k."
                 )
+            self._chainfile = open(self.fname, "a")
             print(
                 "Resuming with",
                 self.resumeLength,
@@ -620,7 +642,7 @@ class PTSampler(object):
         hotChain=False,
         betaSchedule=None,
         holdIter=0,
-        nameChainTemps=False,
+        nameChainTemps=None,
     ):
         """
         Function to carry out PTMCMC sampling.
@@ -634,7 +656,10 @@ class PTSampler(object):
         @param Tmax: Maximum temperature in ladder (default=None)
         @param Tskip: Number of steps between proposed temperature swaps
         (default=100)
-        @param isave: Write to file every isave samples (default=1000)
+        @param isave: Write to file every isave iterations (default=1000).
+        isave and thin must be positive integers, with isave a multiple of thin.
+        Resuming preserves isave and requires 1 + k * (isave // thin) saved
+        rows for a nonnegative integer k
         @param covUpdate: Number of iterations between AM covariance updates
         (default=1000)
         @param SCAMweight: Weight of SCAM jumps in overall jump cycle
@@ -665,8 +690,10 @@ class PTSampler(object):
         len(self.betaSchedule)-1
         @param holdIter: Number of initial beta=0 schedule states to prepend
         before following betaSchedule.
-        @param nameChainTemps: Reverts to temperature naming convention of
-        chains (default=False)
+        @param nameChainTemps: If True, name chains by temperature. If False,
+        name chains by beta. If None (default), use temperature names for
+        ordinary PT and beta names for model switch. Scheduled beta runs
+        always use chain_schedule.txt
 
         """
 
@@ -1143,6 +1170,15 @@ class PTSampler(object):
             ladder = np.array([1.0])
 
         return ladder
+
+    def temperatureLadder(self, Tmin=1, Tmax=None, tstep=None):
+        """
+        Return a temperature ladder using the legacy public method name.
+
+        Ladder() returns inverse temperatures (beta); this compatibility
+        wrapper returns temperatures instead.
+        """
+        return 1.0 / self.Ladder(Tmin=Tmin, Tmax=Tmax, tstep=tstep)
 
     def _writeToFile(self, iter):
         """
