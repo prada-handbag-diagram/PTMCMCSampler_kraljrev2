@@ -763,7 +763,10 @@ class PTSampler(object):
 
                 else:
                     lnlike0 = self.logl(p0)
-                    lnprob0 = self.beta * lnlike0 + lp
+                    if lnlike0 == -np.inf:
+                        lnprob0 = -np.inf
+                    else:
+                        lnprob0 = self.beta * lnlike0 + lp
 
             else:
 
@@ -780,14 +783,21 @@ class PTSampler(object):
 
                 else:
                     lnlike1 = self.logl1(p0)
-                    lnprob1 = lnlike1 + lp1
-
                     lnlike2 = self.logl2(p0)
-                    lnprob2 = lnlike2 + lp2
 
-                    lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
+                    if lnlike1 == -np.inf or lnlike2 == -np.inf:
+                        lnprob0 = -np.inf
+                        lnlike0 = -np.inf
+                        lnlike1 = -np.inf
+                        lnprob1 = -np.inf
+                        lnlike2 = -np.inf
+                        lnprob2 = -np.inf
+                    else:
+                        lnprob1 = lnlike1 + lp1
+                        lnprob2 = lnlike2 + lp2
 
-                    lnprob0 = self.beta * (lnlike0) + lnprob2
+                        lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
+                        lnprob0 = self.beta * lnlike0 + lnprob2
 
         # Scheduled beta runs change the model switch target distribution each iteration
         if self.betaSchedule is not None:
@@ -1000,7 +1010,10 @@ class PTSampler(object):
 
                 else:
                     newlnlike = self.logl(y)
-                    newlnprob = self.beta * newlnlike + lp
+                    if newlnlike == -np.inf:
+                        newlnprob = -np.inf
+                    else:
+                        newlnprob = self.beta * newlnlike + lp
 
             else:
                 lp1 = self.logp1(y)
@@ -1018,18 +1031,26 @@ class PTSampler(object):
 
                 else:
                     newlnlike1 = self.logl1(y)
-                    newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
-
                     newlnlike2 = self.logl2(y)
-                    newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
 
-                    newlnlike = newlnprob1 - newlnprob2
+                    if newlnlike1 == -np.inf or newlnlike2 == -np.inf:
+                        newlnlike = -np.inf
+                        newlnprob = -np.inf
+                        newlnlike1 = -np.inf
+                        newlnprob1 = -np.inf
+                        newlnlike2 = -np.inf
+                        newlnprob2 = -np.inf
+                    else:
+                        newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
+                        newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
 
-                    # ln posterior = beta * ln likelihood + ln prior
-                    # ln prior is set to ln posterior of the second model
-                    # ln likelihood is the difference between ln posterior of the first and second models
-                    # beta determines how much of newlnprob1 vs newlnprob2
-                    newlnprob = self.beta * newlnlike + newlnprob2
+                        newlnlike = newlnprob1 - newlnprob2
+
+                        # ln posterior = beta * ln likelihood + ln prior
+                        # ln prior is set to ln posterior of the second model
+                        # ln likelihood is the difference between ln posterior of the first and second models
+                        # beta determines how much of newlnprob1 vs newlnprob2
+                        newlnprob = self.beta * newlnlike + newlnprob2
 
             # hastings step
             diff = newlnprob - lnprob0 + qxy
@@ -1138,7 +1159,10 @@ class PTSampler(object):
         self.swapProposed += 1
 
         # calculate new posterior values
-        lnprob0 = self.beta * lnlike0 + self.logp(p0)
+        if lnlike0 == -np.inf:
+            lnprob0 = -np.inf
+        else:
+            lnprob0 = self.beta * lnlike0 + self.logp(p0)
 
         return p0, lnlike0, lnprob0
 
