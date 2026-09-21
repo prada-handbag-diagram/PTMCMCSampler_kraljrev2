@@ -809,7 +809,7 @@ class PTSampler(object):
                 )
 
             self.beta = float(self.betaSchedule[current_idx])
-            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+            if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
                 lnprob0 = -np.inf
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
@@ -959,7 +959,7 @@ class PTSampler(object):
                 raise IndexError(f"betaSchedule index out of range: idx={idx}, len={len(self.betaSchedule)}")
             self.beta = float(self.betaSchedule[idx])
 
-            if (lnprob2 is None) or (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+            if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
                 lnprob0 = -np.inf
             else:
                 lnprob0 = self.beta * lnlike0 + lnprob2
