@@ -1196,15 +1196,6 @@ class PTSampler(object):
 
         return ladder
 
-    def temperatureLadder(self, Tmin=1, Tmax=None, tstep=None):
-        """
-        Return a temperature ladder using the legacy public method name.
-
-        Ladder() returns inverse temperatures (beta); this compatibility
-        wrapper returns temperatures instead.
-        """
-        return 1.0 / self.Ladder(Tmin=Tmin, Tmax=Tmax, tstep=tstep)
-
     def _writeToFile(self, iter):
         """
         Function to write chain file. Non-model-switch output has parameter
