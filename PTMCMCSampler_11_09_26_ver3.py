@@ -974,7 +974,7 @@ class PTSampler(object):
 
         # if resuming, just use previous chain points. Use each one thin times to compensate for
         # thinning when they were written out
-        if self.resume and self.resumeLength > 0 and iter < self.resumeLength * self.thin:
+        if self.resume and self.resumeLength > 0 and iter <= (self.resumeLength - 1) * self.thin:
             row = self.resumechain[iter // self.thin]
 
             if self.modelswitch:
