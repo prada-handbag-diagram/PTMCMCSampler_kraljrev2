@@ -360,8 +360,8 @@ class PTSampler(object):
         self.nswap_accepted = 0
 
         # Number of metaparameters written after the sampled parameters.
-        # Model switch output includes beta as its first metaparameter.
-        self.n_metaparams = 9 if self.modelswitch else 4
+        # Model switch: beta, four model log values, and two acceptance rates.
+        self.n_metaparams = 7 if self.modelswitch else 4
 
         if self.modelswitch:
             self._lnprob1 = np.zeros(N)
@@ -485,7 +485,7 @@ class PTSampler(object):
                 if self.resumechain.shape[1] != expected_cols:
                     current_mode = "model-switch" if self.modelswitch else "non-model-switch"
                     expected_format = (
-                        "parameters + 9 metaparameters" if self.modelswitch else "parameters + 4 metaparameters"
+                        "parameters + 7 metaparameters" if self.modelswitch else "parameters + 4 metaparameters"
                     )
                     raise Exception(
                         f"Cannot resume chain file {self.fname}: expected {expected_cols} columns "
@@ -736,12 +736,18 @@ class PTSampler(object):
             if self.modelswitch:
                 p0 = self.resumechain[0, : self.ndim]
                 self.beta = self.resumechain[0, self.ndim]
-                lnprob0 = self.resumechain[0, self.ndim + 1]
-                lnlike0 = self.resumechain[0, self.ndim + 2]
-                lnprob1 = self.resumechain[0, self.ndim + 3]
-                lnlike1 = self.resumechain[0, self.ndim + 4]
-                lnprob2 = self.resumechain[0, self.ndim + 5]
-                lnlike2 = self.resumechain[0, self.ndim + 6]
+                lnprob1 = self.resumechain[0, self.ndim + 1]
+                lnlike1 = self.resumechain[0, self.ndim + 2]
+                lnprob2 = self.resumechain[0, self.ndim + 3]
+                lnlike2 = self.resumechain[0, self.ndim + 4]
+
+                # Reconstruct the two internal values no longer stored in the file.
+                if (not np.isfinite(lnprob1)) or (not np.isfinite(lnprob2)):
+                    lnlike0 = -np.inf
+                    lnprob0 = -np.inf
+                else:
+                    lnlike0 = lnprob2 - lnprob1
+                    lnprob0 = self.beta * lnlike0 + lnprob1
 
             else:
                 p0, lnlike0, lnprob0 = (
@@ -796,8 +802,8 @@ class PTSampler(object):
                         lnprob1 = lnlike1 + lp1
                         lnprob2 = lnlike2 + lp2
 
-                        lnlike0 = lnprob1 - lnprob2  # Difference between the two model log posteriors
-                        lnprob0 = self.beta * lnlike0 + lnprob2
+                        lnlike0 = lnprob2 - lnprob1  # Model 2 minus model 1 log posterior
+                        lnprob0 = self.beta * lnlike0 + lnprob1
 
         # Scheduled beta runs change the model switch target distribution each iteration
         if self.betaSchedule is not None:
@@ -809,10 +815,10 @@ class PTSampler(object):
                 )
 
             self.beta = float(self.betaSchedule[current_idx])
-            if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
+            if (not np.isfinite(lnprob1)) or (not np.isfinite(lnlike0)):
                 lnprob0 = -np.inf
             else:
-                lnprob0 = self.beta * lnlike0 + lnprob2
+                lnprob0 = self.beta * lnlike0 + lnprob1
 
         # record first values
         self.tstart = time.time()
@@ -977,18 +983,18 @@ class PTSampler(object):
                 if self.betaSchedule is None:
                     self.beta = row[self.ndim]
 
-                lnprob0 = row[self.ndim + 1]
-                lnlike0 = row[self.ndim + 2]
-                lnprob1 = row[self.ndim + 3]
-                lnlike1 = row[self.ndim + 4]
-                lnprob2 = row[self.ndim + 5]
-                lnlike2 = row[self.ndim + 6]
+                lnprob1 = row[self.ndim + 1]
+                lnlike1 = row[self.ndim + 2]
+                lnprob2 = row[self.ndim + 3]
+                lnlike2 = row[self.ndim + 4]
 
-                if self.betaSchedule is not None:
-                    if (not np.isfinite(lnprob2)) or (not np.isfinite(lnlike0)):
-                        lnprob0 = -np.inf
-                    else:
-                        lnprob0 = self.beta * lnlike0 + lnprob2
+                # Reconstruct using the current beta, including scheduled-beta runs.
+                if (not np.isfinite(lnprob1)) or (not np.isfinite(lnprob2)):
+                    lnlike0 = -np.inf
+                    lnprob0 = -np.inf
+                else:
+                    lnlike0 = lnprob2 - lnprob1
+                    lnprob0 = self.beta * lnlike0 + lnprob1
 
             else:
                 p0, lnlike0, lnprob0 = row[:-4], row[-3], row[-4]
@@ -1044,13 +1050,11 @@ class PTSampler(object):
                         newlnprob1 = newlnlike1 + lp1  # no beta here, we want full posterior of each model
                         newlnprob2 = newlnlike2 + lp2  # no beta here, we want full posterior of each model
 
-                        newlnlike = newlnprob1 - newlnprob2
+                        newlnlike = newlnprob2 - newlnprob1
 
-                        # ln posterior = beta * ln likelihood + ln prior
-                        # ln prior is set to ln posterior of the second model
-                        # ln likelihood is the difference between ln posterior of the first and second models
-                        # beta determines how much of newlnprob1 vs newlnprob2
-                        newlnprob = self.beta * newlnlike + newlnprob2
+                        # Model switch target: (1 - beta) * newlnprob1 + beta * newlnprob2
+                        # beta = 0 is model 1; beta = 1 is model 2
+                        newlnprob = self.beta * newlnlike + newlnprob1
 
             # hastings step
             diff = newlnprob - lnprob0 + qxy
@@ -1199,12 +1203,12 @@ class PTSampler(object):
     def _writeToFile(self, iter):
         """
         Function to write chain file. Non-model-switch output has parameter
-        values followed by 4 metaparameters: log-posterior, log-likelihood,
-        acceptance rate, and PT acceptance rate. Model-switch output has
-        parameter values followed by 9 metaparameters: beta, log-posterior,
-        log-likelihood, model-1 log-posterior, model-1 log-likelihood,
-        model-2 log-posterior, model-2 log-likelihood, acceptance rate,
-        and PT acceptance rate
+        values followed by 4 metaparameters: log posterior, log likelihood,
+        acceptance rate, and PT acceptance rate. Model switch output has
+        parameter values followed by 7 metaparameters: beta,
+        model 1 log posterior, model 1 log likelihood,
+        model 2 log posterior, model 2 log likelihood,
+        acceptance rate, and PT acceptance rate.
 
         @param iter: Iteration of sampler
 
@@ -1225,8 +1229,9 @@ class PTSampler(object):
             if self.modelswitch:
                 self._chainfile.write("\t%22.22f" % self._beta[ind])
 
-            # main posterior / likelihood for the active chain state
-            self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
+            # Ordinary sampling still writes its posterior and likelihood columns.
+            if not self.modelswitch:
+                self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
 
             # extra model-switch diagnostics, if present
             if self.modelswitch:
