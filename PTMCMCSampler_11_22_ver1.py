@@ -741,7 +741,7 @@ class PTSampler(object):
                 lnprob2 = self.resumechain[0, self.ndim + 3]
                 lnlike2 = self.resumechain[0, self.ndim + 4]
 
-                # Reconstruct the two internal values no longer stored in the file.
+                # Reconstruct the two internal values not stored in the file
                 if (not np.isfinite(lnprob1)) or (not np.isfinite(lnprob2)):
                     lnlike0 = -np.inf
                     lnprob0 = -np.inf
@@ -1229,7 +1229,7 @@ class PTSampler(object):
             if self.modelswitch:
                 self._chainfile.write("\t%22.22f" % self._beta[ind])
 
-            # Ordinary sampling still writes its posterior and likelihood columns.
+            # Ordinary sampling writes its posterior and likelihood columns
             if not self.modelswitch:
                 self._chainfile.write("\t%f\t%f" % (self._lnprob[ind], self._lnlike[ind]))
 
